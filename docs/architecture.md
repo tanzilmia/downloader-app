@@ -80,6 +80,17 @@ or M4A format. A source with no remaining choices explains the limitation and
 cannot enqueue a hidden format. Existing WebM history, contracts and engine
 compatibility remain intact; this is a presentation preference.
 
+Audio selection retains the best stream per container so higher-bitrate WebM
+cannot displace M4A. If no separate M4A exists, a compatible combined MP4 may
+provide an `audio:<source-id>` choice. The reserved prefix distinguishes its job
+from the video choice and is removed only by the strict source-selector parser;
+cached downloader metadata still contains inspected source IDs. FFmpeg copies
+only the local audio track into M4A, and FFprobe rejects any video stream in an
+audio-only result. Known silent/incompatible sources are not offered; unknown
+direct-file codecs must pass actual processing and verification. The preview
+groups audio before video and explains when a full source video transfer is
+needed to save audio.
+
 Tool manifests bind target/version/path/SHA-256. Portable paths stay within their
 package; developer paths are absolute. Verify startup and per execution. Fixed
 argument arrays, reduced environment, disabled cookies/plugins/config/remote

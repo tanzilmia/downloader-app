@@ -398,6 +398,8 @@ impl YtdlpBackend {
             || !streams
                 .iter()
                 .any(|stream| stream["codec_type"] == expected)
+            || (job.format.audio_only
+                && streams.iter().any(|stream| stream["codec_type"] == "video"))
         {
             return Err(failure(
                 ErrorCode::Integrity,

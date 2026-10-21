@@ -538,6 +538,106 @@ fn metadata_filters_drm_non_http_and_unsafe_selectors_and_builds_stream_pairs() 
     assert!(metadata::parse(br#"{"is_live":true}"#, "https://youtube.com/watch?v=one").is_err());
 }
 
+#[test]
+fn audio_selection_keeps_m4a_when_webm_has_a_higher_bitrate() {
+    let raw = serde_json::json!({"formats":[
+        {"format_id":"18","ext":"mp4","protocol":"https","url":"https://cdn.example.org/video.mp4","vcodec":"avc1","acodec":"mp4a.40.2","height":360},
+        {"format_id":"139","ext":"m4a","protocol":"https","url":"https://cdn.example.org/low.m4a","vcodec":"none","acodec":"mp4a.40.2","abr":48},
+        {"format_id":"140","ext":"m4a","protocol":"https","url":"https://cdn.example.org/high.m4a","vcodec":"none","acodec":"mp4a.40.2","abr":128},
+        {"format_id":"251","ext":"webm","protocol":"https","url":"https://cdn.example.org/audio.webm","vcodec":"none","acodec":"opus","abr":160},
+        {"format_id":"drm","ext":"m4a","protocol":"https","url":"https://cdn.example.org/drm.m4a","vcodec":"none","acodec":"aac","abr":320,"has_drm":true}
+    ]});
+    let media = metadata::parse(
+        &serde_json::to_vec(&raw).unwrap(),
+        "https://example.org/video",
+    )
+    .unwrap();
+    let audio: Vec<_> = media.formats.iter().filter(|f| f.audio_only).collect();
+    assert_eq!(audio.len(), 2);
+    assert_eq!(audio[0].id, "140");
+    assert_eq!(audio[0].extension, "m4a");
+    assert_eq!(audio[1].id, "251");
+    assert_eq!(audio[1].extension, "webm");
+    assert!(metadata::download_info(&serde_json::to_vec(&raw).unwrap(), &media).is_ok());
+}
+
+#[test]
+fn combined_mp4_offers_a_distinct_audio_selection_using_the_inspected_source() {
+    let raw = serde_json::json!({"formats":[
+        {"format_id":"big","ext":"mp4","protocol":"https","url":"https://cdn.example.org/big.mp4","vcodec":"avc1","acodec":"aac","height":720,"filesize":2000},
+        {"format_id":"small","ext":"mp4","protocol":"https","url":"https://cdn.example.org/small.mp4","vcodec":"avc1","acodec":"mp4a.40.2","height":360,"filesize":1000}
+    ]});
+    let bytes = serde_json::to_vec(&raw).unwrap();
+    let media = metadata::parse(&bytes, "https://example.org/video").unwrap();
+    let audio = media.formats.iter().find(|f| f.audio_only).unwrap();
+    assert_eq!(audio.id, "audio:small");
+    assert_eq!(audio.extension, "m4a");
+    assert_eq!(audio.estimated_bytes, 1000);
+    assert_eq!(metadata::format_parts(&audio.id).unwrap(), vec!["small"]);
+    let info: serde_json::Value =
+        serde_json::from_slice(&metadata::download_info(&bytes, &media).unwrap()).unwrap();
+    let sources = info["formats"].as_array().unwrap();
+    assert_eq!(sources.len(), 2); // The audio choice reuses one source, without a synthetic yt-dlp selector.
+    assert!(sources.iter().any(|f| f["format_id"] == "small"));
+    assert!(!sources.iter().any(|f| f["format_id"] == "audio:small"));
+}
+
+#[test]
+fn audio_extraction_does_not_offer_known_silent_or_incompatible_video_tracks() {
+    for codec in ["none", "opus", "vorbis"] {
+        let raw = serde_json::json!({"formats":[
+            {"format_id":"mp4","ext":"mp4","protocol":"https","url":"https://cdn.example.org/video.mp4","vcodec":"avc1","acodec":codec}
+        ]});
+        let media = metadata::parse(
+            &serde_json::to_vec(&raw).unwrap(),
+            "https://example.org/video",
+        );
+        if codec == "none" {
+            assert_eq!(media.unwrap_err().code, ErrorCode::Unsupported);
+            continue;
+        }
+        let media = media.unwrap();
+        assert!(
+            !media.formats.iter().any(|f| f.audio_only),
+            "unexpected M4A for {codec}"
+        );
+    }
+    for id in [
+        "audio:",
+        "audio:a+b",
+        "audio:--exec",
+        "audio:audio:18",
+        "audio:18;touch x",
+    ] {
+        assert!(
+            metadata::format_parts(id).is_err(),
+            "accepted unsafe selector {id}"
+        );
+    }
+}
+
+#[test]
+fn direct_media_preserves_audio_codecs_and_allows_verified_extraction_when_unknown() {
+    let direct_audio = br#"{"format_id":"direct","ext":"m4a","protocol":"https","url":"https://cdn.example.org/audio.m4a","vcodec":"none","acodec":"aac","abr":128}"#;
+    let media = metadata::parse(direct_audio, "https://example.org/audio").unwrap();
+    assert_eq!(media.formats.len(), 1);
+    assert!(media.formats[0].audio_only);
+    assert_eq!(media.formats[0].id, "direct");
+    assert!(metadata::download_info(direct_audio, &media).is_ok());
+    let unknown_audio = br#"{"format_id":"direct","ext":"m4a","protocol":"https","url":"https://cdn.example.org/audio.m4a"}"#;
+    let media = metadata::parse(unknown_audio, "https://example.org/audio").unwrap();
+    assert_eq!(media.formats.len(), 1);
+    assert!(media.formats[0].audio_only);
+    assert!(metadata::download_info(unknown_audio, &media).is_ok());
+    let direct_video = br#"{"format_id":"mp4","ext":"mp4","protocol":"https","url":"https://cdn.example.org/video.mp4"}"#;
+    let media = metadata::parse(direct_video, "https://example.org/video").unwrap();
+    assert!(media
+        .formats
+        .iter()
+        .any(|f| f.id == "audio:mp4" && f.audio_only));
+    assert!(metadata::download_info(direct_video, &media).is_ok());
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn process_deadline_output_limit_and_literal_arguments_are_enforced() -> Result<(), AppError>

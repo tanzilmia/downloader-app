@@ -29,12 +29,12 @@ has been extended with the user-approved real downloader and release preparation
 | `pnpm test:e2e`                                         | 9 browser workflow/keyboard/persistence/axe checks pass                 |
 | `cargo fmt --all -- --check`                            | Pass                                                                    |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass                                                                    |
-| `cargo test --workspace`                                | 44 Rust checks pass                                                     |
+| `cargo test --workspace`                                | 48 Rust checks pass                                                     |
 | `pnpm audit --prod`                                     | No known vulnerabilities                                                |
 | `pnpm test:native:build` / native flow                  | Actual WKWebView suite passes; evidence below                           |
 | `pnpm engine:portable` / `pnpm desktop:bundle`          | Verified engine staged, unsigned macOS app built                        |
 
-100 deterministic unit/integration/browser tests, plus opt-in native and live
+104 deterministic unit/integration/browser tests, plus opt-in native and live
 integration runs. Tests include shared old/real contracts, migration/reopen,
 terminal-state races, process timeout/output overflow/descendant termination,
 network policy, file tampering/symlinks/collision/receipt crash recovery and 200
@@ -289,3 +289,41 @@ screenshots demonstrate layout only, not additional live downloads.
 Evidence: `output/release/clean-ui-{check,e2e,rust,visual,accessibility}.log` and
 `output/playwright/clean-ui-{downloads-dark,downloads-light,active-dark,narrow-dark,narrow-light,360-light,home-dark,home-light,library}.png`.
 Portable app build log: `output/release/clean-ui-bundle.log`.
+
+## Audio download options restored
+
+The inspector previously kept only the highest-bitrate audio stream across all
+containers. A higher-bitrate WebM displaced an available M4A, so hiding WebM in
+the picker also hid the usable audio option. Keep the best audio separately for
+M4A and WebM; the desktop continues to exclude WebM. Preserve direct-file audio
+codec metadata and recognize M4A audio even when codec details are missing.
+
+Sources with only a compatible combined MP4 now offer a separate M4A choice with
+an `audio:` selection ID. It resolves to one validated inspected stream for cache
+sanitization and yt-dlp, while retaining a distinct audio-only job identity. Prefer
+the smallest known combined source, then the lowest resolution when sizes tie.
+Known silent or incompatible codecs are excluded; unknown direct-file codecs are
+verified during processing. The existing local FFmpeg copy path extracts audio
+without re-encoding. FFprobe must find audio and no video before publication.
+
+Preview puts a labelled Audio only / M4A group before video choices. Selecting it
+changes the action to Download audio. Combined-source choices explain that the
+video is transferred first and only the M4A output is saved. Missing compatible
+audio is explained instead of offering a nonfunctional audio choice.
+
+Four additional Rust regressions cover M4A/WebM selection, distinct extraction
+IDs and reuse of inspected sources, unsafe selectors and incompatible/silent
+codecs, and direct media with known/missing codec metadata. All 48 Rust checks,
+Clippy, `pnpm check` (47 checks) and all 9 browser workflows pass. CLI checks
+also confirm a mock audio job, WebM exclusion, the real-labelled Download audio
+button and the exact `audio:mp4` enqueue selection. Axe scans cover the selected
+audio preview in dark/light at 360, 540 and 1280 pixels.
+
+Actual public Sintel MP4 → M4A transfer completed through the verified portable
+engine and public-destination proxy. Output is 833,206 bytes, 51.946667 seconds,
+AAC audio only, SHA-256
+`b48c9b804f1fe5e01e79ae3b2cc041eb620fbab9e633b193d33bfbf63642a92f`.
+Independent FFprobe/hash evidence: `output/release/audio-options-live/report.json`.
+Logs: `output/release/audio-options-{check,rust,clippy,e2e,live,ui,accessibility}.log`.
+UI fixtures: `output/playwright/audio-options-{dark,light,narrow}.png`.
+Portable build: `output/release/audio-options-bundle.log`.

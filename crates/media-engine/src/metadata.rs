@@ -18,6 +18,9 @@ pub struct Metadata {
     pub kind: Option<String>,
     pub is_live: Option<bool>,
     pub has_drm: Option<bool>,
+    pub vcodec: Option<String>,
+    pub acodec: Option<String>,
+    pub abr: Option<f64>,
 }
 #[derive(Clone, Deserialize)]
 pub struct Format {
@@ -57,6 +60,11 @@ fn allowed(format: &Format) -> bool {
 fn size(format: &Format) -> u64 {
     format.filesize.or(format.filesize_approx).unwrap_or(0)
 }
+fn audio_stream(format: &Format) -> bool {
+    (format.vcodec.as_deref() == Some("none")
+        || (format.vcodec.is_none() && format.ext.as_deref() == Some("m4a")))
+        && format.acodec.as_deref() != Some("none")
+}
 fn clean(value: Option<String>, fallback: &str) -> String {
     let value: String = value
         .unwrap_or_default()
@@ -83,11 +91,10 @@ pub(crate) fn download_info(bytes: &[u8], media: &Media) -> Result<Vec<u8>, AppE
         )
     };
     let root: Value = serde_json::from_slice(bytes).map_err(|_| invalid())?;
-    let needed: std::collections::HashSet<_> = media
-        .formats
-        .iter()
-        .flat_map(|format| format.id.split('+'))
-        .collect();
+    let mut needed = std::collections::HashSet::new();
+    for format in &media.formats {
+        needed.extend(format_parts(&format.id)?);
+    }
     let candidates = root
         .get("formats")
         .and_then(Value::as_array)
@@ -244,10 +251,10 @@ pub fn parse(bytes: &[u8], source: &str) -> Result<Media, AppError> {
             ext: metadata.ext,
             protocol: metadata.protocol,
             url: metadata.url,
-            vcodec: None,
-            acodec: None,
+            vcodec: metadata.vcodec,
+            acodec: metadata.acodec,
             height: None,
-            abr: None,
+            abr: metadata.abr,
             filesize: None,
             filesize_approx: None,
             has_drm: metadata.has_drm,
@@ -285,11 +292,7 @@ pub fn parse(bytes: &[u8], source: &str) -> Result<Media, AppError> {
             let audio_ext = if extension == "mp4" { "m4a" } else { "webm" };
             let audio = available
                 .iter()
-                .filter(|a| {
-                    a.vcodec.as_deref() == Some("none")
-                        && a.acodec.as_deref() != Some("none")
-                        && a.ext.as_deref() == Some(audio_ext)
-                })
+                .filter(|a| audio_stream(a) && a.ext.as_deref() == Some(audio_ext))
                 .max_by(|a, b| a.abr.unwrap_or(0.0).total_cmp(&b.abr.unwrap_or(0.0)));
             let Some(audio) = audio else {
                 continue;
@@ -319,23 +322,61 @@ pub fn parse(bytes: &[u8], source: &str) -> Result<Media, AppError> {
             break;
         }
     }
-    if let Some(audio) = available
-        .iter()
-        .filter(|a| a.vcodec.as_deref() == Some("none") && a.acodec.as_deref() != Some("none"))
-        .max_by(|a, b| a.abr.unwrap_or(0.0).total_cmp(&b.abr.unwrap_or(0.0)))
-    {
-        formats.push(MediaFormat {
-            id: audio.format_id.clone(),
-            label: "Audio only".into(),
-            extension: audio.ext.clone().unwrap_or_else(|| "m4a".into()),
-            quality: audio
-                .abr
-                .filter(|a| a.is_finite())
-                .map(|a| format!("{} kbps", a as u64))
-                .unwrap_or_else(|| "Original audio".into()),
-            estimated_bytes: size(audio),
-            audio_only: true,
-        });
+    // Keep the best audio for each container. A higher-bitrate WebM stream must
+    // not displace M4A when the desktop picker hides WebM.
+    for extension in ["m4a", "webm"] {
+        if let Some(audio) = available
+            .iter()
+            .filter(|a| audio_stream(a) && a.ext.as_deref() == Some(extension))
+            .max_by(|a, b| a.abr.unwrap_or(0.0).total_cmp(&b.abr.unwrap_or(0.0)))
+        {
+            formats.push(MediaFormat {
+                id: audio.format_id.clone(),
+                label: "Audio only".into(),
+                extension: extension.into(),
+                quality: audio
+                    .abr
+                    .filter(|a| a.is_finite() && *a > 0.0)
+                    .map(|a| format!("{} kbps", a as u64))
+                    .unwrap_or_else(|| "Original audio".into()),
+                estimated_bytes: size(audio),
+                audio_only: true,
+            });
+        }
+    }
+    if !formats.iter().any(|f| f.audio_only && f.extension == "m4a") {
+        // Some sources expose only a combined MP4. Copy its audio track into
+        // M4A using the existing local-only processing path. Missing codec
+        // metadata is common for direct links; FFmpeg/FFprobe still verify the
+        // actual track before publication. Known incompatible codecs are omitted.
+        if let Some(source) = available
+            .iter()
+            .filter(|f| {
+                f.ext.as_deref() == Some("mp4")
+                    && f.vcodec.as_deref() != Some("none")
+                    && f.acodec.as_deref().is_none_or(|codec| {
+                        codec == "aac" || codec == "alac" || codec.starts_with("mp4a.")
+                    })
+            })
+            .min_by_key(|f| {
+                let bytes = size(f);
+                (
+                    if bytes == 0 { u64::MAX } else { bytes },
+                    f.height
+                        .filter(|h| h.is_finite() && *h > 0.0)
+                        .unwrap_or(f64::MAX) as u64,
+                )
+            })
+        {
+            formats.push(MediaFormat {
+                id: format!("audio:{}", source.format_id),
+                label: "Audio only".into(),
+                extension: "m4a".into(),
+                quality: "Original audio".into(),
+                estimated_bytes: size(source),
+                audio_only: true,
+            });
+        }
     }
     if formats.is_empty() {
         return Err(failure(
@@ -360,8 +401,12 @@ pub fn parse(bytes: &[u8], source: &str) -> Result<Media, AppError> {
     })
 }
 pub fn format_parts(value: &str) -> Result<Vec<&str>, AppError> {
-    let parts: Vec<_> = value.split('+').collect();
-    if parts.len() > 2 || parts.iter().any(|p| !safe_id(p)) {
+    // The reserved prefix identifies audio extraction from one inspected MP4;
+    // only the validated source selector reaches yt-dlp or cached stream data.
+    let audio = value.strip_prefix("audio:");
+    let parts: Vec<_> = audio.unwrap_or(value).split('+').collect();
+    if parts.len() > 2 || (audio.is_some() && parts.len() != 1) || parts.iter().any(|p| !safe_id(p))
+    {
         return Err(failure(
             ErrorCode::Validation,
             "The saved format selection is invalid. Inspect the source again.",

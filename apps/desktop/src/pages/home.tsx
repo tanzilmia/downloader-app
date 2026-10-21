@@ -46,6 +46,11 @@ function PreviewDialog({
   const formats =
     media?.formats.filter((format) => format.extension !== 'webm') ?? [];
   const [selected, setSelected] = useState(formats[0]?.id ?? '');
+  const selectedFormat = formats.find((format) => format.id === selected);
+  const formatGroups = [
+    { title: 'Audio only', icon: AudioLines, audioOnly: true },
+    { title: 'Video', icon: MonitorPlay, audioOnly: false },
+  ];
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const upsert = useApp((state) => state.upsert);
@@ -114,7 +119,10 @@ function PreviewDialog({
           {media ? (
             <>
               <div className="preview-media">
-                <MediaArt platform={media.platform} />
+                <MediaArt
+                  platform={media.platform}
+                  audio={selectedFormat?.audioOnly}
+                />
                 <span className="duration-tag">
                   {duration(media.durationSeconds)}
                 </span>
@@ -125,40 +133,62 @@ function PreviewDialog({
               </p>
               {formats.length ? (
                 <fieldset className="format-options">
-                  <legend>YOUR FORMAT</legend>
-                  {formats.map((format) => (
-                    <label
-                      key={format.id}
-                      className={`format-option ${selected === format.id ? 'selected' : ''}`}
-                    >
-                      <input
-                        type="radio"
-                        name="format"
-                        value={format.id}
-                        checked={selected === format.id}
-                        onChange={() => setSelected(format.id)}
-                        disabled={pending}
-                      />
-                      <span className="format-icon">
-                        {format.audioOnly ? (
-                          <AudioLines size={20} />
-                        ) : (
-                          <MonitorPlay size={20} />
-                        )}
-                      </span>
-                      <span>
-                        <strong>
-                          {format.label} <span>{format.quality}</span>
-                        </strong>
-                        <small>
-                          {format.extension.toUpperCase()} <span>·</span>{' '}
-                          {bytes(format.estimatedBytes)} estimated
-                        </small>
-                      </span>
-                      <span className="radio-indicator">
-                        {selected === format.id ? <Check size={12} /> : null}
-                      </span>
-                    </label>
+                  <legend>DOWNLOAD FORMAT</legend>
+                  {formatGroups.map(({ title, icon: Icon, audioOnly }) => (
+                    <div className="format-group" key={title}>
+                      <h4>
+                        <Icon size={15} />
+                        {title}
+                        <span>{audioOnly ? 'M4A' : 'MP4'}</span>
+                      </h4>
+                      {formats
+                        .filter((format) => format.audioOnly === audioOnly)
+                        .map((format) => (
+                          <label
+                            key={format.id}
+                            className={`format-option ${selected === format.id ? 'selected' : ''}`}
+                          >
+                            <input
+                              type="radio"
+                              name="format"
+                              value={format.id}
+                              checked={selected === format.id}
+                              onChange={() => setSelected(format.id)}
+                              disabled={pending}
+                            />
+                            <span className="format-icon">
+                              {format.audioOnly ? (
+                                <AudioLines size={20} />
+                              ) : (
+                                <MonitorPlay size={20} />
+                              )}
+                            </span>
+                            <span>
+                              <strong>
+                                {format.label} <span>{format.quality}</span>
+                              </strong>
+                              <small>
+                                {format.extension.toUpperCase()} <span>·</span>{' '}
+                                {bytes(format.estimatedBytes)} estimated
+                              </small>
+                            </span>
+                            <span className="radio-indicator">
+                              {selected === format.id ? (
+                                <Check size={12} />
+                              ) : null}
+                            </span>
+                          </label>
+                        ))}
+                      {!formats.some(
+                        (format) => format.audioOnly === audioOnly,
+                      ) ? (
+                        <p className="format-unavailable">
+                          {audioOnly
+                            ? 'No compatible M4A audio is available for this link.'
+                            : 'This link has no MP4 video option.'}
+                        </p>
+                      ) : null}
+                    </div>
                   ))}
                 </fieldset>
               ) : (
@@ -167,6 +197,12 @@ function PreviewDialog({
                   Try another public link.
                 </p>
               )}
+              {selectedFormat?.id.startsWith('audio:') ? (
+                <p className="audio-extraction-note">
+                  Audio is extracted from the source video. The video must be
+                  downloaded first; only the M4A audio file is saved.
+                </p>
+              ) : null}
               <p className="mock-note">
                 <Sparkles size={14} />
                 {media.isMock
@@ -202,7 +238,9 @@ function PreviewDialog({
                     ? `Retry in ${duration(pause.seconds)}`
                     : media.isMock
                       ? 'Add mock download'
-                      : 'Download video'}
+                      : selectedFormat?.audioOnly
+                        ? 'Download audio'
+                        : 'Download video'}
               </Button>
             </>
           ) : null}

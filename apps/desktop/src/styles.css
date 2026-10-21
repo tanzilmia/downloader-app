@@ -1643,6 +1643,37 @@ select {
   margin-bottom: 8px;
   cursor: pointer;
 }
+.format-group + .format-group {
+  margin-top: 18px;
+}
+.format-group h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.format-group h4 > svg {
+  color: var(--muted);
+}
+.format-group h4 > span {
+  margin-left: auto;
+  color: var(--faint);
+  font:
+    8px 'DM Mono',
+    monospace;
+}
+.format-unavailable,
+.audio-extraction-note {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.8;
+}
+.audio-extraction-note {
+  margin-top: 14px;
+}
 .format-option.selected {
   border-color: #a2bc73;
   background: var(--accent-dim);
