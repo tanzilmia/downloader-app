@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-enqueue-job"
+description = "Enables the enqueue_job command without any pre-configured scope."
+commands.allow = ["enqueue_job"]
+
+[[permission]]
+identifier = "deny-enqueue-job"
+description = "Denies the enqueue_job command without any pre-configured scope."
+commands.deny = ["enqueue_job"]

@@ -1,0 +1,33 @@
+{
+  "valid": [
+    "https://www.youtube.com/watch?v=BaW_jenozKc",
+    "https://youtu.be/abc",
+    "https://www.instagram.com/p/sample/",
+    "https://www.tiktok.com/@sample/video/123",
+    "https://facebook.com/watch?v=1",
+    "https://media.example.org/video",
+    "https://youtube.com.evil.org/a"
+  ],
+  "invalid": [
+    "",
+    "a video link",
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+    "ftp://youtube.com/a",
+    "http://127.1/a",
+    "http://2130706433/a",
+    "http://0x7f000001/a",
+    "https://[::1]/",
+    "https://192.168.1.1/a",
+    "https://user:pass@youtube.com/a",
+    "https://youtube.com:123/a",
+    "https://localhost/a",
+    "https://a.local/a",
+    "https://a.internal/a",
+    "https://a.test/a",
+    "https://a.onion/a",
+    "https://foo.com./a",
+    "https://-bad.com/a",
+    "https://foo..com/a"
+  ]
+}

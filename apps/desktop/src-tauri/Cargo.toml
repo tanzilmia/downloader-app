@@ -1,0 +1,26 @@
+[package]
+name = "downpour-desktop"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+name = "downpour_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+download-core = { path = "../../../crates/download-core" }
+serde.workspace = true
+tokio.workspace = true
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+serde_json.workspace = true
+tempfile = "3"

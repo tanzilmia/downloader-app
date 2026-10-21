@@ -1,0 +1,12 @@
+pnpm-lock.yaml
+Cargo.lock
+target
+dist
+node_modules
+apps/desktop/src-tauri/gen
+*.rs
+*.toml
+.playwright-cli
+output
+test-results
+playwright-report

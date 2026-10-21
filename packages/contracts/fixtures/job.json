@@ -1,0 +1,53 @@
+{
+  "id": "f9e0f22c-bb87-42a0-964a-1bc51632c6e0",
+  "media": {
+    "url": "https://www.youtube.com/watch?v=BaW_jenozKc",
+    "title": "A little further from the everyday",
+    "creator": "The Open Road",
+    "platform": "youtube",
+    "durationSeconds": 247,
+    "formats": [
+      {
+        "id": "mock-1080p",
+        "label": "Full HD",
+        "extension": "mp4",
+        "quality": "1080p",
+        "estimatedBytes": 86000000,
+        "audioOnly": false
+      },
+      {
+        "id": "mock-720p",
+        "label": "HD",
+        "extension": "mp4",
+        "quality": "720p",
+        "estimatedBytes": 42000000,
+        "audioOnly": false
+      },
+      {
+        "id": "mock-audio",
+        "label": "Audio only",
+        "extension": "m4a",
+        "quality": "128 kbps",
+        "estimatedBytes": 4000000,
+        "audioOnly": true
+      }
+    ],
+    "isMock": true
+  },
+  "format": {
+    "id": "mock-1080p",
+    "label": "Full HD",
+    "extension": "mp4",
+    "quality": "1080p",
+    "estimatedBytes": 86000000,
+    "audioOnly": false
+  },
+  "status": "completed",
+  "progress": 100.0,
+  "attempt": 1,
+  "revision": 23,
+  "createdAt": "2026-10-21T09:00:00.000Z",
+  "updatedAt": "2026-10-21T09:00:07.000Z",
+  "error": null,
+  "isMock": true
+}
