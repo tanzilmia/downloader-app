@@ -1,0 +1,43 @@
+{
+  "id": "7db62c44-e3fe-4714-abc6-8c8247f729c2",
+  "media": {
+    "url": "https://download.blender.org/durian/trailer/sintel_trailer-480p.mp4",
+    "title": "sintel_trailer-480p",
+    "creator": "Public media",
+    "platform": "other",
+    "durationSeconds": 0,
+    "formats": [
+      {
+        "id": "mp4",
+        "label": "Video",
+        "extension": "mp4",
+        "quality": "Original",
+        "estimatedBytes": 0,
+        "audioOnly": false
+      }
+    ],
+    "isMock": false
+  },
+  "format": {
+    "id": "mp4",
+    "label": "Video",
+    "extension": "mp4",
+    "quality": "Original",
+    "estimatedBytes": 0,
+    "audioOnly": false
+  },
+  "status": "completed",
+  "progress": 100.0,
+  "attempt": 2,
+  "revision": 22,
+  "createdAt": "2026-10-21T04:53:02.936Z",
+  "updatedAt": "2026-10-21T04:53:26.261Z",
+  "error": null,
+  "isMock": false,
+  "output": {
+    "path": "/downloads/sintel_trailer-480p-7db62c44-e3fe-4714-abc6-8c8247f729c2.mp4",
+    "bytes": 4368946,
+    "sha256": "0ddfda269653c691c41a90c9d14a8fe5fa43bec79339a679427edf69c11fc2cd",
+    "durationSeconds": 52.208333
+  }
+}

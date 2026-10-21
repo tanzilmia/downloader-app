@@ -4,9 +4,11 @@ import { useApp } from '../state/app';
 import { EmptyState } from '../components/empty-state';
 import { MediaArt } from '../components/media-art';
 import { bytes, dateLabel, duration } from '../lib/utils';
+import { OutputActions } from '../components/output-actions';
 
 export function Library() {
   const jobs = useApp((state) => state.jobs);
+  const engine = useApp((state) => state.engine);
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState('all');
   const completed = jobs.filter((job) => job.status === 'completed');
@@ -26,13 +28,14 @@ export function Library() {
         <span className="eyebrow">A PLACE FOR YOUR FAVORITES</span>
         <span className="local-label">
           <FolderHeart size={14} />
-          {completed.length} completed mocks
+          {completed.length}{' '}
+          {engine === 'mock' ? 'completed mocks' : 'completed downloads'}
         </span>
       </div>
       <div className="screen-heading">
         <div>
-          <h1>A little collection.</h1>
-          <p>The things you wanted to come back to.</p>
+          <h1>Your library.</h1>
+          <p>Your saved videos and audio, ready to revisit.</p>
         </div>
       </div>
       <div className="library-tools">
@@ -71,7 +74,9 @@ export function Library() {
                   audio={job.format.audioOnly}
                 />
                 <span className="duration-tag">
-                  {duration(job.media.durationSeconds)}
+                  {duration(
+                    job.output?.durationSeconds ?? job.media.durationSeconds,
+                  )}
                 </span>
               </div>
               <div className="library-card-body">
@@ -84,10 +89,14 @@ export function Library() {
                 <div className="library-card-bottom">
                   <span>
                     {job.format.quality} <span>·</span>{' '}
-                    {bytes(job.format.estimatedBytes)} est.
+                    {bytes(job.output?.bytes ?? job.format.estimatedBytes)}
+                    {job.output ? '' : ' est.'}
                   </span>
-                  <span className="mock-badge">SIMULATED</span>
+                  <span className="mock-badge">
+                    {job.isMock ? 'SIMULATED' : 'VERIFIED'}
+                  </span>
                 </div>
+                {job.output ? <OutputActions id={job.id} /> : null}
               </div>
             </article>
           ))}
@@ -103,13 +112,17 @@ export function Library() {
           description={
             completed.length
               ? 'Try a different title, creator or media type.'
-              : 'Completed mock downloads will appear here. Your collection is just a link away.'
+              : engine === 'mock'
+                ? 'Completed mock downloads will appear here. Your collection is just a link away.'
+                : 'Your completed downloads will appear here, ready to open offline.'
           }
           action={!completed.length}
         />
       )}
       <p className="footnote">
-        Mock history only. These entries have no saved media files.
+        {engine === 'mock'
+          ? 'Mock history only. These entries have no saved media files.'
+          : 'Verified files stay in your download folder. Earlier simulated entries are labelled separately.'}
       </p>
     </div>
   );

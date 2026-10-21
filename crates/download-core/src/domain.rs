@@ -8,6 +8,8 @@ pub struct AppError {
     pub code: ErrorCode,
     pub message: String,
     pub retryable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_seconds: Option<u32>,
 }
 
 impl AppError {
@@ -16,11 +18,12 @@ impl AppError {
             code: ErrorCode::Validation,
             message: message.into(),
             retryable: false,
+            retry_after_seconds: None,
         }
     }
     pub fn storage(error: impl std::fmt::Display) -> Self {
         eprintln!("Downpour storage error: {error}");
-        Self { code: ErrorCode::Storage, message: "Local storage is unavailable. Check disk space and app-data permissions, then restart.".into(), retryable: true }
+        Self { code: ErrorCode::Storage, message: "Local storage is unavailable. Check disk space and app-data permissions, then restart.".into(), retryable: true, retry_after_seconds: None }
     }
 }
 
@@ -37,9 +40,14 @@ pub enum ErrorCode {
     Validation,
     Storage,
     Network,
+    RateLimited,
     Unsupported,
     Interrupted,
     Internal,
+    Dependency,
+    DiskFull,
+    Integrity,
+    Timeout,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -114,12 +122,41 @@ pub struct Job {
     pub format: MediaFormat,
     pub status: JobStatus,
     pub progress: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed_bytes_per_second: Option<f64>,
     pub attempt: u32,
     pub revision: u64,
     pub created_at: String,
     pub updated_at: String,
     pub error: Option<AppError>,
     pub is_mock: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<OutputFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputFile {
+    pub path: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub duration_seconds: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineInfo {
+    pub available: bool,
+    pub message: String,
+    pub output_directory: Option<String>,
+    pub tools: Vec<ToolInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolInfo {
+    pub name: String,
+    pub version: String,
 }
 
 impl Job {
@@ -132,6 +169,9 @@ impl Job {
             )));
         }
         self.status = status;
+        if status != JobStatus::Downloading {
+            self.speed_bytes_per_second = None;
+        }
         self.touch();
         Ok(())
     }
@@ -181,6 +221,8 @@ pub struct Snapshot {
     pub settings: Settings,
     pub engine: String,
     pub persistence: String,
+    pub engine_info: EngineInfo,
+    pub health: Option<AppError>,
 }
 
 pub fn now() -> String {

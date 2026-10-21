@@ -7,6 +7,7 @@ fn main() {
             "cancel_job",
             "retry_job",
             "update_settings",
+            "open_output",
         ]),
     ))
     .expect("could not build Tauri application manifest");

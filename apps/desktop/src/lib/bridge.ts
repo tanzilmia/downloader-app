@@ -4,6 +4,8 @@ import {
   commandSchemas,
   jobSchema,
   JOB_EVENT,
+  HEALTH_EVENT,
+  errorSchema,
   type Bridge,
   type CommandInput,
   type CommandName,
@@ -23,8 +25,8 @@ const nativeBridge: Bridge = {
     );
     return commandSchemas[command].output.parse(response) as CommandOutput<K>;
   },
-  async subscribe(listener) {
-    return listen<unknown>(JOB_EVENT, (event) => {
+  async subscribe(listener, onHealth) {
+    const unlisten = await listen<unknown>(JOB_EVENT, (event) => {
       const result = jobSchema.safeParse(event.payload);
       if (result.success) listener(result.data);
       else
@@ -36,6 +38,19 @@ const nativeBridge: Bridge = {
           }),
         );
     });
+    try {
+      const unlistenHealth = await listen<unknown>(HEALTH_EVENT, (event) => {
+        const result = errorSchema.nullable().safeParse(event.payload);
+        if (result.success) onHealth?.(result.data);
+      });
+      return () => {
+        unlisten();
+        unlistenHealth();
+      };
+    } catch (error) {
+      unlisten();
+      throw error;
+    }
   },
 };
 

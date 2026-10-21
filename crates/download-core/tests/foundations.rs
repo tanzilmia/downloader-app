@@ -15,6 +15,23 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 const URL: &str = "https://www.youtube.com/watch?v=BaW_jenozKc";
+#[tokio::test]
+async fn real_artifact_contract_survives_database_reopen() {
+    let job: Job = serde_json::from_str(include_str!(
+        "../../../packages/contracts/fixtures/real-job.json"
+    ))
+    .unwrap();
+    assert!(!job.is_mock);
+    assert_eq!(job.output.as_ref().unwrap().bytes, 4368946);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("real.db");
+    let repository = Repository::open(&path).await.unwrap();
+    repository.insert(&job).await.unwrap();
+    repository.close().await;
+    let reopened = Repository::open(&path).await.unwrap();
+    assert_eq!(reopened.get(&job.id).await.unwrap(), job);
+    reopened.close().await;
+}
 fn fixture() -> Job {
     serde_json::from_str(include_str!(
         "../../../packages/contracts/fixtures/job.json"
@@ -96,6 +113,7 @@ async fn fresh_database_migrates_reopens_and_recovers_interrupted_jobs() {
     let mut job = fixture();
     job.status = JobStatus::Downloading;
     job.progress = 45.0;
+    job.speed_bytes_per_second = Some(512_000.0);
     repository.insert(&job).await.unwrap();
     repository.close().await;
     drop(first);
@@ -114,6 +132,7 @@ async fn fresh_database_migrates_reopens_and_recovers_interrupted_jobs() {
     );
     assert_eq!(recovered.jobs[0].status, JobStatus::Queued);
     assert_eq!(recovered.jobs[0].progress, 0.0);
+    assert_eq!(recovered.jobs[0].speed_bytes_per_second, None);
     assert_eq!(recovered.jobs[0].attempt, 1);
     assert_eq!(recovered.jobs[0].revision, job.revision + 1);
     assert_eq!(
@@ -127,7 +146,7 @@ async fn fresh_database_migrates_reopens_and_recovers_interrupted_jobs() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(count, 1);
+    assert_eq!(count, 2);
     assert!(sqlx::query("UPDATE jobs SET status = 'bogus'")
         .execute(&pool)
         .await
@@ -253,6 +272,7 @@ impl TransferEngine for FailOnceEngine {
                 code: ErrorCode::Network,
                 message: "A simulated network interruption.".into(),
                 retryable: true,
+                retry_after_seconds: None,
             })
         } else {
             Ok(())

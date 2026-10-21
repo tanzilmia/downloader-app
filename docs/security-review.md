@@ -1,45 +1,40 @@
-# Foundation security review
+# Implementation security review
 
-Scope: Phase 1 React/TypeScript UI, wire validation, Rust command boundary, native
-permissions and mock queue. This is a focused implementation review, not a release
-security certification. Rust-specific guidance was reviewed against code/tests;
-the security-best-practices skill supplies React and general frontend guidance.
+Scope: UI, native IPC, Rust queue and real adapter. Implementation evidence,
+not release certification. React/general TypeScript guidance from the
+security-best-practices skill informed the frontend review.
 
-## Verified controls
+## Controls and evidence
 
-- UI renders untrusted strings with React's normal escaping. No raw HTML, eval,
-  dynamic scripts, arbitrary navigation, remote thumbnails or remote fonts.
-- Public HTTP(S) URLs are validated in Zod and Rust. Shared negative fixtures
-  reject file/script schemes, credentials, IP literals and local/reserved names.
-- Native commands revalidate URL/format/settings inputs and use bound SQL
-  parameters. No shell commands or media executables run in the application.
-- `tauri.conf.json` restricts production scripts to bundled assets and connections
-  to IPC. Inline styles support numeric progress widths and the dialog library;
-  script `unsafe-inline` is limited to Vite development, never the release policy.
-- `capabilities/main.json` grants only listed commands and event listen/unlisten
-  to the local main window. IPC tests demonstrate denial for a remote origin and
-  another window, plus rejection of invalid payloads.
-- No shell/filesystem/HTTP plugin capabilities, cookie access, credentials,
-  analytics or cloud services. Browser storage holds only validated mock jobs and
-  preferences; it is separate from native SQLite.
-- Job cancellation/terminal states are serialized and committed before events.
-  Corrupt browser data is preserved; failed writes do not publish success events.
-- `pnpm audit --prod` returned no known vulnerabilities during this session.
+- Escaped React text, local assets, no raw HTML/eval/dynamic scripts. Production
+  CSP restricts assets and connections to bundled content/IPC.
+- Explicit main-window capabilities. IPC tests reject remote origins, another
+  window, unsafe URLs and invalid settings. File actions accept job IDs, recheck
+  completed provenance and verify owned paths/size/hash.
+- Public HTTP(S) validation in TS/Rust plus authenticated loopback proxy. Every
+  destination resolves to public addresses; connect to validated sockets. Tests
+  cover mixed/excessive DNS answers, private/special addresses, proxy auth and
+  private tunnels. Redirect requests use the same policy.
+- Fixed tool paths, startup/per-use SHA-256, literal argument arrays without shell,
+  reduced environment, no cookies/plugins/config/remote components. Bounded pipes,
+  deadlines, free-space/working-size caps and actual descendant-kill tests.
+- Native downloader only; local FFmpeg/FFprobe protocols/demuxers restricted.
+  Portable FFmpeg has network support disabled. No DRM/sign-in bypass.
+- UUID-owned partials, bounded sanitized names, symlink/collision checks,
+  capacity checks, FFprobe streams/duration, nonzero size, SHA-256 receipts and
+  no-overwrite publication. Tests reject tampered files and recover crashes.
+- Persist before events, count workers until exit, reject late cancelled success.
+  Typed storage health and recovery; 200-job/shutdown bounds tests.
+- Native automation has isolated identity/data and a debug-only feature, with
+  compile-time rejection in release builds.
+- `pnpm audit --prod`: no known vulnerabilities on 2026-10-21.
 
-No exploitable high/critical issue was identified within this mock scope.
+## Limits before release
 
-## Gates before real networking or release
-
-1. URL hostname validation is not DNS/redirect enforcement. Keep real extraction
-   disabled until public destination validation, rebinding/redirect behavior and
-   yt-dlp network paths are threat modeled and tested.
-2. `safe_filename_stem` only sanitizes a stem. It does not implement a safe file
-   manager. Exclusive output reservation, symlink/overwrite defenses, partial-file
-   handling, integrity verification and atomic finalization remain Phase 3.
-3. Vet sidecars and JavaScript challenge components, pin versions/checksums,
-   constrain process arguments/lifecycle and retain license/build provenance.
-4. Run Rust advisory/supply-chain review, OS-native security tests, resource-limit
-   tests and signed clean-machine installation checks before release.
-5. Native disk failures currently surface through startup/command errors and
-   worker logs. Add a typed engine-health event and recovery UX before real
-   transfers so prolonged storage failure is immediately visible.
+The proxy is policy for trusted tools, not an OS sandbox. Same-user executable or
+path replacement between checking and use is outside these controls. Media parser
+vulnerabilities need ongoing advisories and platform sandboxing. Controlled public
+redirect/DNS service integration coverage is incomplete, although every connection
+uses the tested proxy checks. Windows job-object behavior and other OS install
+checks need native runners. Rust/bundled-runtime advisory and complete licensing
+qualification, signing/notarization and clean-host checks remain release gates.

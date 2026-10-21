@@ -1,7 +1,7 @@
-# Native engines (not bundled in Phase 1)
+# Engine staging
 
-Do not place arbitrary developer binaries here. Phase 3 will stage verified
-yt-dlp, FFmpeg, FFprobe and a JS runtime using target-suffixed filenames, a SHA-256
-manifest, version/source/license notices and executable permissions. Then enable
-the corresponding `bundle.externalBin` entries. Homebrew binaries are developer
-tools, not portable redistributable sidecars.
+Portable staging now uses `engines/<target>/` at the workspace root via
+`pnpm engine:portable`. `pnpm desktop:bundle` verifies relative paths and hashes,
+then maps tools/source/notices into bundled resources. This legacy sidecar folder
+stays empty; see `docs/release.md` and ADR 0004. Homebrew binaries are development
+tools and must not be copied into portable packages.

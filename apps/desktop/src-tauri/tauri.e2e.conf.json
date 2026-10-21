@@ -1,0 +1,6 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "app.downpour.e2e",
+  "productName": "Downpour E2E",
+  "bundle": { "active": false }
+}

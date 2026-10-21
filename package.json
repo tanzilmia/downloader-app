@@ -18,7 +18,14 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
-    "doctor": "node scripts/doctor.mjs"
+    "doctor": "node scripts/doctor.mjs",
+    "engine:setup": "node scripts/setup-engine.mjs",
+    "engine:portable": "node scripts/prepare-portable-engine.mjs",
+    "desktop:bundle": "node scripts/bundle-portable.mjs",
+    "test:native:build": "node scripts/desktop.mjs build --debug --features native-e2e --no-bundle --config src-tauri/tauri.e2e.conf.json",
+    "test:native": "node scripts/native-e2e.mjs",
+    "test:native:startup": "node scripts/native-startup-check.mjs",
+    "test:native:rate-limit": "node scripts/native-rate-limit-check.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",

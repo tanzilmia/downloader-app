@@ -98,26 +98,47 @@ export const errorSchema = z.object({
     'validation',
     'storage',
     'network',
+    'rate_limited',
     'unsupported',
     'interrupted',
     'internal',
+    'dependency',
+    'disk_full',
+    'integrity',
+    'timeout',
   ]),
   message: z.string(),
   retryable: z.boolean(),
+  retryAfterSeconds: z.number().int().positive().max(900).optional(),
 });
 export type AppError = z.infer<typeof errorSchema>;
+export const outputSchema = z.object({
+  path: z.string(),
+  bytes: z.number().int().positive(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  durationSeconds: z.number().positive(),
+});
+export const engineInfoSchema = z.object({
+  available: z.boolean(),
+  message: z.string(),
+  outputDirectory: z.string().nullable(),
+  tools: z.array(z.object({ name: z.string(), version: z.string() })),
+});
+export type EngineInfo = z.infer<typeof engineInfoSchema>;
 export const jobSchema = z.object({
   id: z.string().uuid(),
   media: mediaSchema,
   format: formatSchema,
   status: statusSchema,
   progress: z.number().min(0).max(100),
+  speedBytesPerSecond: z.number().finite().nonnegative().optional(),
   attempt: z.number().int().nonnegative(),
   revision: z.number().int().nonnegative(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   error: errorSchema.nullable(),
   isMock: z.boolean(),
+  output: outputSchema.optional(),
 });
 export type Job = z.infer<typeof jobSchema>;
 export const settingsSchema = z.object({
@@ -129,11 +150,19 @@ export const defaultSettings: Settings = { concurrency: 2, theme: 'dark' };
 export const snapshotSchema = z.object({
   jobs: z.array(jobSchema),
   settings: settingsSchema,
-  engine: z.literal('mock'),
+  engine: z.enum(['mock', 'yt-dlp']),
   persistence: z.enum(['sqlite', 'browser']),
+  engineInfo: engineInfoSchema.default({
+    available: true,
+    message: 'Simulated transfers. No media files are created.',
+    outputDirectory: null,
+    tools: [],
+  }),
+  health: errorSchema.nullable().default(null),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export const JOB_EVENT = 'job:updated';
+export const HEALTH_EVENT = 'engine:health';
 export const enqueueSchema = z.object({
   url: publicUrlSchema,
   formatId: z.string().min(1).max(100),
@@ -149,6 +178,10 @@ export const commandSchemas = {
   cancel_job: { input: idSchema, output: jobSchema },
   retry_job: { input: idSchema, output: jobSchema },
   update_settings: { input: settingsSchema, output: settingsSchema },
+  open_output: {
+    input: idSchema.extend({ reveal: z.boolean() }),
+    output: z.null(),
+  },
 };
 export type CommandName = keyof typeof commandSchemas;
 export type CommandInput<K extends CommandName> = z.input<
@@ -162,7 +195,10 @@ export interface Bridge {
     command: K,
     input: CommandInput<K>,
   ): Promise<CommandOutput<K>>;
-  subscribe(listener: (job: Job) => void): Promise<() => void>;
+  subscribe(
+    listener: (job: Job) => void,
+    onHealth?: (error: AppError | null) => void,
+  ): Promise<() => void>;
 }
 export function errorMessage(error: unknown): string {
   if (error instanceof z.ZodError)

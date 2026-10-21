@@ -36,6 +36,13 @@ export class BrowserBridge implements Bridge {
           settings: { ...defaultSettings },
           engine: 'mock' as const,
           persistence: 'browser' as const,
+          engineInfo: {
+            available: true,
+            message: 'Simulated transfers. No media files are created.',
+            outputDirectory: null,
+            tools: [],
+          },
+          health: null,
         };
     for (const job of snapshot.jobs) {
       if (job.status === 'downloading') {
@@ -85,6 +92,7 @@ export class BrowserBridge implements Bridge {
     if (!canTransition(job.status, next))
       throw new Error(`Cannot change ${job.status} to ${next}.`);
     job.status = next;
+    delete job.speedBytesPerSecond;
     job.revision++;
     job.updatedAt = new Date().toISOString();
   }
@@ -119,6 +127,10 @@ export class BrowserBridge implements Bridge {
     this.load();
     let output: unknown;
     switch (command) {
+      case 'open_output':
+        throw new Error(
+          'Saved files are available in the desktop application.',
+        );
       case 'get_snapshot':
         output = this.state;
         break;

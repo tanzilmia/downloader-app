@@ -48,3 +48,11 @@ the foundation. Rich library organization, real files and advanced features wait
 6. Build native release matrix, sign/notarize and verify installers on clean hosts.
 
 Do not describe the app as production-ready until all required release gates pass.
+
+## Implementation status (2026-10-21)
+
+Foundation and the approved real-engine/native/reliability work are implemented.
+See real-engine-plan.md for acceptance and progress.md for concrete evidence.
+A portable unsigned macOS candidate exists. Broader site compatibility, other OS
+execution, signing and public redistribution qualification remain release gates;
+advanced queue/mobile functionality remains outside the delivered slice.

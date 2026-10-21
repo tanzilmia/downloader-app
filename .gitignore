@@ -9,6 +9,10 @@ playwright-report/
 test-results/
 .playwright-cli/
 output/playwright/
+output/real-downloads/
+output/native-e2e/
+output/release/
+engines/
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/binaries/*
 !apps/desktop/src-tauri/binaries/README.md

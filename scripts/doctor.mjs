@@ -37,5 +37,5 @@ for (const [command, args, required] of checks) {
   if (!ok && required) process.exitCode = 1;
 }
 console.log(
-  'Media tools are optional for the mock build. Live site compatibility and portable packaging require separate verification.',
+  'Media tools are optional for browser preview. Native downloads require engine:setup or a verified portable engine. Live site compatibility requires separate verification.',
 );

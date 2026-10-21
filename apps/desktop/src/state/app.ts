@@ -5,6 +5,8 @@ import {
   type Job,
   type Settings,
   type Snapshot,
+  type EngineInfo,
+  type AppError,
 } from '@downpour/contracts';
 import { bridge } from '../lib/bridge';
 
@@ -13,6 +15,9 @@ interface AppState {
   settings: Settings;
   persistence: Snapshot['persistence'];
   ready: boolean;
+  engine: Snapshot['engine'];
+  engineInfo: EngineInfo;
+  health: AppError | null;
   error: string | null;
   pending: string[];
   upsert: (job: Job) => void;
@@ -41,6 +46,14 @@ export const useApp = create<AppState>((set) => ({
   settings: defaultSettings,
   persistence: 'browser',
   ready: false,
+  engine: 'mock',
+  engineInfo: {
+    available: true,
+    message: 'Simulated transfers. No media files are created.',
+    outputDirectory: null,
+    tools: [],
+  },
+  health: null,
   error: null,
   pending: [],
   upsert: (job) =>
@@ -65,8 +78,9 @@ export const useApp = create<AppState>((set) => ({
 export async function initializeApp() {
   let unsubscribe: (() => void) | undefined;
   try {
-    unsubscribe = await bridge.subscribe((job) =>
-      useApp.getState().upsert(job),
+    unsubscribe = await bridge.subscribe(
+      (job) => useApp.getState().upsert(job),
+      (health) => useApp.setState({ health }),
     );
     const snapshot = await bridge.invoke('get_snapshot', {});
     // Events may arrive while fetching; revisions protect newer committed state.
@@ -75,6 +89,9 @@ export async function initializeApp() {
       settings: snapshot.settings,
       persistence: snapshot.persistence,
       ready: true,
+      engine: snapshot.engine,
+      engineInfo: snapshot.engineInfo,
+      health: snapshot.health,
     });
   } catch (error) {
     unsubscribe?.();

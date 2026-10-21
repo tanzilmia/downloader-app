@@ -14,14 +14,18 @@ import {
   Globe2,
   Link2,
   Loader2,
-  LockKeyhole,
   MonitorPlay,
   Play,
   Plus,
   Sparkles,
   X,
 } from 'lucide-react';
-import { errorMessage, publicUrlSchema, type Media } from '@downpour/contracts';
+import {
+  detectPlatform,
+  errorMessage,
+  publicUrlSchema,
+  type Media,
+} from '@downpour/contracts';
 import { bridge } from '../lib/bridge';
 import { bytes, duration } from '../lib/utils';
 import { useApp } from '../state/app';
@@ -29,6 +33,8 @@ import { Button } from '../components/ui/button';
 import { MediaArt } from '../components/media-art';
 import { JobList } from '../components/job-list';
 import { EmptyState } from '../components/empty-state';
+import { RequestPause } from '../components/request-pause';
+import { useRetryPause } from '../lib/use-retry-pause';
 
 function PreviewDialog({
   media,
@@ -37,13 +43,22 @@ function PreviewDialog({
   media: Media | null;
   onClose: () => void;
 }) {
-  const [selected, setSelected] = useState('mock-1080p');
+  const formats =
+    media?.formats.filter((format) => format.extension !== 'webm') ?? [];
+  const [selected, setSelected] = useState(formats[0]?.id ?? '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const upsert = useApp((state) => state.upsert);
   const navigate = useNavigate();
+  const pause = useRetryPause();
   async function enqueue() {
-    if (!media || pending) return;
+    if (
+      !media ||
+      pending ||
+      pause.seconds ||
+      !formats.some((format) => format.id === selected)
+    )
+      return;
     setPending(true);
     setError(null);
     try {
@@ -55,6 +70,7 @@ function PreviewDialog({
       onClose();
       navigate('/downloads');
     } catch (error) {
+      pause.capture(error);
       setError(errorMessage(error));
     } finally {
       setPending(false);
@@ -91,7 +107,9 @@ function PreviewDialog({
           </div>
           <Dialog.Title>Make it yours to revisit.</Dialog.Title>
           <Dialog.Description>
-            Choose a format for this mock transfer.
+            {media?.isMock
+              ? 'Choose a format for this mock transfer.'
+              : 'Choose a format to save on this device.'}
           </Dialog.Description>
           {media ? (
             <>
@@ -105,63 +123,86 @@ function PreviewDialog({
               <p className="preview-creator">
                 {media.creator} <span>·</span> {media.platform}
               </p>
-              <fieldset className="format-options">
-                <legend>YOUR FORMAT</legend>
-                {media.formats.map((format) => (
-                  <label
-                    key={format.id}
-                    className={`format-option ${selected === format.id ? 'selected' : ''}`}
-                  >
-                    <input
-                      type="radio"
-                      name="format"
-                      value={format.id}
-                      checked={selected === format.id}
-                      onChange={() => setSelected(format.id)}
-                      disabled={pending}
-                    />
-                    <span className="format-icon">
-                      {format.audioOnly ? (
-                        <AudioLines size={20} />
-                      ) : (
-                        <MonitorPlay size={20} />
-                      )}
-                    </span>
-                    <span>
-                      <strong>
-                        {format.label} <span>{format.quality}</span>
-                      </strong>
-                      <small>
-                        {format.extension.toUpperCase()} <span>·</span>{' '}
-                        {bytes(format.estimatedBytes)} estimated
-                      </small>
-                    </span>
-                    <span className="radio-indicator">
-                      {selected === format.id ? <Check size={12} /> : null}
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
+              {formats.length ? (
+                <fieldset className="format-options">
+                  <legend>YOUR FORMAT</legend>
+                  {formats.map((format) => (
+                    <label
+                      key={format.id}
+                      className={`format-option ${selected === format.id ? 'selected' : ''}`}
+                    >
+                      <input
+                        type="radio"
+                        name="format"
+                        value={format.id}
+                        checked={selected === format.id}
+                        onChange={() => setSelected(format.id)}
+                        disabled={pending}
+                      />
+                      <span className="format-icon">
+                        {format.audioOnly ? (
+                          <AudioLines size={20} />
+                        ) : (
+                          <MonitorPlay size={20} />
+                        )}
+                      </span>
+                      <span>
+                        <strong>
+                          {format.label} <span>{format.quality}</span>
+                        </strong>
+                        <small>
+                          {format.extension.toUpperCase()} <span>·</span>{' '}
+                          {bytes(format.estimatedBytes)} estimated
+                        </small>
+                      </span>
+                      <span className="radio-indicator">
+                        {selected === format.id ? <Check size={12} /> : null}
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              ) : (
+                <p className="field-error" role="status">
+                  No MP4 or M4A download options are available for this link.
+                  Try another public link.
+                </p>
+              )}
               <p className="mock-note">
-                <Sparkles size={14} /> Mock preview. Metadata and transfers are
-                simulated; no media file will be saved.
+                <Sparkles size={14} />
+                {media.isMock
+                  ? 'Mock preview. Metadata and transfers are simulated; no media file will be saved.'
+                  : 'Saved locally after media and integrity checks. Keep only media you have permission to download.'}
               </p>
               {error ? (
                 <p role="alert" className="field-error">
                   {error}
                 </p>
               ) : null}
+              <RequestPause
+                seconds={pause.seconds}
+                id="preview-youtube-pause"
+              />
               <Button
                 className="w-full"
+                data-testid="enqueue"
                 onClick={() => void enqueue()}
-                disabled={pending}
+                disabled={pending || pause.seconds > 0 || !formats.length}
+                aria-describedby={
+                  pause.seconds ? 'preview-youtube-pause' : undefined
+                }
               >
                 {pending ? (
                   <Loader2 size={17} className="spin" />
                 ) : (
                   <Plus size={17} />
                 )}{' '}
-                {pending ? 'Adding to queue…' : 'Add mock download'}
+                {pending
+                  ? 'Adding to queue…'
+                  : pause.seconds
+                    ? `Retry in ${duration(pause.seconds)}`
+                    : media.isMock
+                      ? 'Add mock download'
+                      : 'Download video'}
               </Button>
             </>
           ) : null}
@@ -178,9 +219,17 @@ export function Home() {
   const [media, setMedia] = useState<Media | null>(null);
   const jobs = useApp((state) => state.jobs);
   const ready = useApp((state) => state.ready);
+  const engine = useApp((state) => state.engine);
+  const engineInfo = useApp((state) => state.engineInfo);
+  const pause = useRetryPause();
+  const parsedUrl = publicUrlSchema.safeParse(url);
+  const pauseSeconds =
+    parsedUrl.success && detectPlatform(parsedUrl.data) === 'youtube'
+      ? pause.seconds
+      : 0;
   async function inspect(event: FormEvent) {
     event.preventDefault();
-    if (pending) return;
+    if (pending || pauseSeconds) return;
     setError(null);
     const parsed = publicUrlSchema.safeParse(url);
     if (!parsed.success) {
@@ -190,7 +239,12 @@ export function Home() {
     setPending(true);
     try {
       setMedia(await bridge.invoke('inspect_media', { url: parsed.data }));
+      if (ready && !engineInfo.available) {
+        const snapshot = await bridge.invoke('get_snapshot', {});
+        useApp.setState({ engineInfo: snapshot.engineInfo });
+      }
     } catch (error) {
+      pause.capture(error);
       setError(errorMessage(error));
     } finally {
       setPending(false);
@@ -285,7 +339,13 @@ export function Home() {
                 setError(null);
               }}
               aria-invalid={!!error}
-              aria-describedby={error ? 'url-error' : 'link-help'}
+              aria-describedby={
+                pauseSeconds
+                  ? 'youtube-pause'
+                  : error
+                    ? 'url-error'
+                    : 'link-help'
+              }
               disabled={pending}
               autoComplete="off"
               spellCheck={false}
@@ -301,9 +361,17 @@ export function Home() {
               <Clipboard size={15} />
               <span>Paste</span>
             </Button>
-            <Button type="submit" disabled={pending || !ready}>
+            <Button
+              type="submit"
+              disabled={pending || pauseSeconds > 0}
+              aria-describedby={pauseSeconds ? 'youtube-pause' : undefined}
+            >
               {pending ? <Loader2 size={17} className="spin" /> : null}
-              {pending ? 'Looking…' : 'Find video'}
+              {pending
+                ? 'Looking…'
+                : pauseSeconds
+                  ? `Retry in ${duration(pauseSeconds)}`
+                  : 'Find video'}
               <ArrowRight size={16} />
             </Button>
           </div>
@@ -312,13 +380,18 @@ export function Home() {
               {error}
             </p>
           ) : null}
+          <RequestPause seconds={pauseSeconds} />
         </form>
         <div className="link-helper">
           <p id="link-help">A public link is all you need.</p>
           <button
             className="text-button"
             onClick={() => {
-              setUrl('https://www.youtube.com/watch?v=BaW_jenozKc');
+              setUrl(
+                engine === 'mock'
+                  ? 'https://www.youtube.com/watch?v=BaW_jenozKc'
+                  : 'https://download.blender.org/durian/trailer/sintel_trailer-480p.mp4',
+              );
               setError(null);
               document.getElementById('video-url')?.focus();
             }}
@@ -380,30 +453,13 @@ export function Home() {
             />
           )}
         </section>
-        <aside className="little-note">
-          <span className="note-asterisk" aria-hidden="true">
-            ✳
-          </span>
-          <span className="eyebrow">A SMALL REMINDER</span>
-          <h3>
-            Good finds.
-            <br />
-            Quietly kept.
-          </h3>
-          <p>
-            No accounts. No ads.
-            <br />
-            Just a space for your favorites.
-          </p>
-          <div>
-            <LockKeyhole size={13} />
-            <span>Built to stay on your device</span>
-          </div>
-        </aside>
       </div>
       <footer className="page-footer">
         <span>
-          <Sparkles size={13} /> Foundation preview · mock engine
+          <Sparkles size={13} />
+          {engine === 'mock'
+            ? 'Foundation preview · mock engine'
+            : 'Local media engine · verified downloads'}
         </span>
         <span>Only keep media you have permission to download.</span>
       </footer>

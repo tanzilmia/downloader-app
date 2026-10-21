@@ -1,9 +1,9 @@
-use download_core::{AppError, DownloadManager, Job, Media, Settings, Snapshot};
+use download_core::{AppError, Job, Media, Settings, Snapshot};
 use serde::Deserialize;
 use std::sync::Arc;
 use tauri::State;
 
-type Manager<'a> = State<'a, Arc<DownloadManager>>;
+type Services<'a> = State<'a, Arc<crate::services::Services>>;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -23,34 +23,87 @@ pub struct JobInput {
 }
 
 #[tauri::command]
-pub async fn get_snapshot(manager: Manager<'_>) -> Result<Snapshot, AppError> {
-    manager.snapshot().await
+pub async fn get_snapshot(services: Services<'_>) -> Result<Snapshot, AppError> {
+    let runtime = services.get().await?;
+    if let Some(engine) = &runtime.engine {
+        // Retry a missing/repaired manifest on reconnect without restarting the
+        // manager or losing history. Dependency errors remain visible in info.
+        let _ = engine.check_tools().await;
+    }
+    runtime.manager.snapshot().await
 }
 #[tauri::command]
-pub async fn inspect_media(manager: Manager<'_>, input: InspectInput) -> Result<Media, AppError> {
-    manager.inspect(&input.url).await
+pub async fn inspect_media(services: Services<'_>, input: InspectInput) -> Result<Media, AppError> {
+    services.get().await?.manager.inspect(&input.url).await
 }
 #[tauri::command]
-pub async fn enqueue_job(manager: Manager<'_>, input: EnqueueInput) -> Result<Job, AppError> {
-    manager.enqueue(&input.url, &input.format_id).await
+pub async fn enqueue_job(services: Services<'_>, input: EnqueueInput) -> Result<Job, AppError> {
+    services
+        .get()
+        .await?
+        .manager
+        .enqueue(&input.url, &input.format_id)
+        .await
 }
 #[tauri::command]
-pub async fn cancel_job(manager: Manager<'_>, input: JobInput) -> Result<Job, AppError> {
-    manager.cancel(&input.id).await
+pub async fn cancel_job(services: Services<'_>, input: JobInput) -> Result<Job, AppError> {
+    services.get().await?.manager.cancel(&input.id).await
 }
 #[tauri::command]
-pub async fn retry_job(manager: Manager<'_>, input: JobInput) -> Result<Job, AppError> {
-    manager.retry(&input.id).await
+pub async fn retry_job(services: Services<'_>, input: JobInput) -> Result<Job, AppError> {
+    services.get().await?.manager.retry(&input.id).await
 }
 #[tauri::command]
-pub async fn update_settings(manager: Manager<'_>, input: Settings) -> Result<Settings, AppError> {
-    manager.update_settings(input).await
+pub async fn update_settings(
+    services: Services<'_>,
+    input: Settings,
+) -> Result<Settings, AppError> {
+    services.get().await?.manager.update_settings(input).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenInput {
+    id: String,
+    reveal: bool,
+}
+
+#[tauri::command]
+pub async fn open_output(
+    app: tauri::AppHandle,
+    services: Services<'_>,
+    input: OpenInput,
+) -> Result<(), AppError> {
+    use tauri_plugin_opener::OpenerExt;
+    let runtime = services.get().await?;
+    let job = runtime.manager.job(&input.id).await?;
+    if job.status != download_core::JobStatus::Completed || job.is_mock {
+        return Err(AppError::validation(
+            "Only completed real downloads have saved media files.",
+        ));
+    }
+    let engine = runtime
+        .engine
+        .as_ref()
+        .ok_or_else(|| AppError::validation("No real engine is available."))?;
+    let path = engine.files().validate_output(&job, true).await?;
+    if input.reveal {
+        app.opener()
+            .reveal_item_in_dir(path)
+            .map_err(AppError::storage)
+    } else {
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(AppError::storage)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use download_core::{engine::MockEngine, extractor::MockExtractor, Repository};
+    use download_core::{
+        engine::MockEngine, extractor::MockExtractor, DownloadManager, Repository,
+    };
     use serde_json::{json, Value};
     use tauri::{
         ipc::{CallbackFn, InvokeBody},
@@ -86,7 +139,7 @@ mod tests {
             ])
             .build(crate::app_context())
             .unwrap();
-        app.manage(manager);
+        app.manage(crate::services::Services::from_manager(manager));
         let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();

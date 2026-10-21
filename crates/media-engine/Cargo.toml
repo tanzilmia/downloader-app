@@ -1,0 +1,23 @@
+[package]
+name = "media-engine"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+download-core = { path = "../download-core" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+async-trait.workspace = true
+url.workspace = true
+uuid.workspace = true
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+command-group = { version = "5", features = ["with-tokio"] }
+fs2 = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

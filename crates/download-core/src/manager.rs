@@ -4,13 +4,19 @@ use crate::{
     extractor::Extractor,
     Repository,
 };
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 pub type EventSink = Arc<dyn Fn(Job) + Send + Sync>;
+pub type HealthSink = Arc<dyn Fn(Option<AppError>) + Send + Sync>;
 struct Runtime {
     active: HashMap<String, CancellationToken>,
+    reconcile: HashSet<String>,
 }
 
 pub struct DownloadManager {
@@ -20,6 +26,8 @@ pub struct DownloadManager {
     runtime: Mutex<Runtime>,
     emit: EventSink,
     shutdown: CancellationToken,
+    health: std::sync::Mutex<Option<AppError>>,
+    health_sink: std::sync::Mutex<Option<HealthSink>>,
 }
 
 impl DownloadManager {
@@ -35,9 +43,12 @@ impl DownloadManager {
             engine,
             runtime: Mutex::new(Runtime {
                 active: HashMap::new(),
+                reconcile: HashSet::new(),
             }),
             emit,
             shutdown: CancellationToken::new(),
+            health: std::sync::Mutex::new(None),
+            health_sink: std::sync::Mutex::new(None),
         });
         // No workers exist until recovery has committed all interrupted snapshots.
         for mut job in manager.repository.list().await? {
@@ -50,6 +61,7 @@ impl DownloadManager {
                         "Previous session ended during this transfer. Queued for a fresh attempt."
                             .into(),
                     retryable: true,
+                    retry_after_seconds: None,
                 });
                 manager.repository.save(&job).await?;
             }
@@ -63,10 +75,28 @@ impl DownloadManager {
             loop {
                 tokio::select! {
                     _ = manager.shutdown.cancelled() => break,
-                    _ = interval.tick() => { if let Err(error) = manager.schedule().await { eprintln!("Downpour scheduler: {error}"); } }
+                    _ = interval.tick() => {
+                        match manager.schedule().await {
+                            Err(error) => { manager.report_health(Some(error)); tokio::time::sleep(Duration::from_secs(1)).await; },
+                            Ok(()) => manager.report_health(None),
+                        }
+                    }
                 }
             }
         })
+    }
+    pub fn set_health_sink(&self, sink: HealthSink) {
+        *self.health_sink.lock().expect("health sink lock") = Some(sink);
+    }
+    fn report_health(&self, error: Option<AppError>) {
+        let mut current = self.health.lock().expect("health lock");
+        if *current == error {
+            return;
+        }
+        *current = error.clone();
+        if let Some(sink) = self.health_sink.lock().expect("health sink lock").as_ref() {
+            sink(error);
+        }
     }
     pub async fn stop(&self) {
         self.shutdown.cancel();
@@ -75,17 +105,31 @@ impl DownloadManager {
             token.cancel();
         }
     }
+    pub async fn wait_stopped(&self) {
+        let _ = tokio::time::timeout(Duration::from_secs(10), async {
+            while !self.runtime.lock().await.active.is_empty() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+    }
     pub async fn snapshot(&self) -> Result<Snapshot, AppError> {
         let _guard = self.runtime.lock().await;
         Ok(Snapshot {
             jobs: self.repository.list().await?,
             settings: self.repository.settings().await?,
-            engine: "mock".into(),
+            engine: self.engine.name().into(),
             persistence: "sqlite".into(),
+            engine_info: self.engine.info(),
+            health: self.health.lock().expect("health lock").clone(),
         })
     }
     pub async fn inspect(&self, url: &str) -> Result<Media, AppError> {
         self.extractor.inspect(url).await
+    }
+    pub async fn job(&self, id: &str) -> Result<Job, AppError> {
+        let _guard = self.runtime.lock().await;
+        self.repository.get(id).await
     }
     pub async fn enqueue(&self, url: &str, format_id: &str) -> Result<Job, AppError> {
         let media = self.extractor.inspect(url).await?;
@@ -103,11 +147,13 @@ impl DownloadManager {
             format,
             status: JobStatus::Queued,
             progress: 0.0,
+            speed_bytes_per_second: None,
             attempt: 0,
             revision: 0,
             created_at: timestamp.clone(),
             updated_at: timestamp,
             error: None,
+            output: None,
         };
         let _guard = self.runtime.lock().await;
         self.repository.insert(&job).await?;
@@ -147,6 +193,29 @@ impl DownloadManager {
     }
     async fn schedule(self: &Arc<Self>) -> Result<(), AppError> {
         let mut runtime = self.runtime.lock().await;
+        // A transient write failure must not strand a downloading row after its
+        // worker exits. Receipts let the next attempt recover published media.
+        for id in runtime.reconcile.clone() {
+            if runtime.active.contains_key(&id) {
+                continue;
+            }
+            let mut job = self.repository.get(&id).await?;
+            if job.status == JobStatus::Downloading {
+                job.transition(JobStatus::Queued)?;
+                job.progress = 0.0;
+                job.error = Some(AppError {
+                    code: ErrorCode::Interrupted,
+                    message: "Storage recovered. Resuming the interrupted transfer.".into(),
+                    retryable: true,
+                    retry_after_seconds: None,
+                });
+                self.repository.save(&job).await?;
+                (self.emit)(job);
+            } else if job.status == JobStatus::Completed {
+                self.engine.committed(&job).await?;
+            }
+            runtime.reconcile.remove(&id);
+        }
         let concurrency = usize::from(self.repository.settings().await?.concurrency);
         if runtime.active.len() >= concurrency {
             return Ok(());
@@ -162,6 +231,7 @@ impl DownloadManager {
                 continue;
             }
             job.transition(JobStatus::Downloading)?;
+            job.speed_bytes_per_second = None;
             job.attempt += 1;
             job.error = None;
             self.repository.save(&job).await?;
@@ -180,58 +250,101 @@ impl DownloadManager {
         let engine = Arc::clone(&self.engine);
         let request = job.clone();
         let token = cancel.clone();
-        let mut worker = tokio::spawn(async move { engine.run(request, sender, token).await });
+        let mut worker = tokio::spawn(async move { engine.transfer(request, sender, token).await });
+        let mut speed_expiry = tokio::time::interval(Duration::from_secs(1));
+        let mut last_sample = tokio::time::Instant::now();
+        let mut last_percent = job.progress;
+        let mut has_speed = false;
         let result = loop {
             tokio::select! {
-                result = &mut worker => break result.unwrap_or_else(|_| Err(AppError { code: ErrorCode::Internal, message: "Transfer worker stopped unexpectedly.".into(), retryable: true })),
+                result = &mut worker => break result.unwrap_or_else(|_| Err(AppError { code: ErrorCode::Internal, message: "Transfer worker stopped unexpectedly.".into(), retryable: true, retry_after_seconds: None, })),
                 Some(progress) = receiver.recv() => {
-                    if let Err(error) = self.progress(&job.id, progress.percent).await {
+                    last_sample = tokio::time::Instant::now();
+                    last_percent = progress.percent;
+                    has_speed = progress.speed_bytes_per_second.is_some();
+                    if let Err(error) = self.progress(&job.id, progress).await {
                         cancel.cancel();
                         // Await child termination; releasing its slot early would exceed the bound.
                         let _ = worker.await;
                         break Err(error);
                     }
                 }
+                _ = speed_expiry.tick(), if has_speed => {
+                    if last_sample.elapsed() >= Duration::from_secs(3) {
+                        has_speed = false;
+                        if let Err(error) = self.progress(&job.id, TransferProgress {
+                            percent: last_percent,
+                            speed_bytes_per_second: None,
+                        }).await {
+                            cancel.cancel();
+                            let _ = worker.await;
+                            break Err(error);
+                        }
+                    }
+                }
             }
         };
         if let Err(error) = self.finish(&job.id, result).await {
-            eprintln!("Downpour worker persistence: {error}");
+            self.report_health(Some(error));
+            self.runtime.lock().await.reconcile.insert(job.id.clone());
         }
         self.runtime.lock().await.active.remove(&job.id);
     }
-    async fn progress(&self, id: &str, percent: f64) -> Result<(), AppError> {
+    async fn progress(&self, id: &str, progress: TransferProgress) -> Result<(), AppError> {
         let _guard = self.runtime.lock().await;
         let mut job = self.repository.get(id).await?;
         if job.status != JobStatus::Downloading {
             return Ok(());
         }
-        if !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
+        if !progress.percent.is_finite()
+            || !(0.0..=100.0).contains(&progress.percent)
+            || progress
+                .speed_bytes_per_second
+                .is_some_and(|speed| !speed.is_finite() || speed < 0.0)
+        {
             return Err(AppError::validation("Engine reported invalid progress."));
         }
-        job.progress = job.progress.max(percent).min(99.0);
+        job.progress = job.progress.max(progress.percent).min(99.0);
+        job.speed_bytes_per_second = progress.speed_bytes_per_second;
         job.touch();
         self.repository.save(&job).await?;
         (self.emit)(job);
         Ok(())
     }
-    async fn finish(&self, id: &str, result: Result<(), AppError>) -> Result<(), AppError> {
+    async fn finish(
+        &self,
+        id: &str,
+        result: Result<Option<OutputFile>, AppError>,
+    ) -> Result<(), AppError> {
         let _guard = self.runtime.lock().await;
         let mut job = self.repository.get(id).await?;
         if job.status != JobStatus::Downloading {
+            if let Ok(Some(output)) = result {
+                self.engine.discard(&job, &output).await?;
+            }
             return Ok(());
         }
         match result {
-            Ok(()) => {
+            Ok(output) => {
                 job.transition(JobStatus::Completed)?;
                 job.progress = 100.0;
+                job.output = output;
             }
             Err(error) => {
-                job.transition(JobStatus::Failed)?;
+                if self.shutdown.is_cancelled() && error.code == ErrorCode::Interrupted {
+                    job.transition(JobStatus::Queued)?;
+                    job.progress = 0.0;
+                } else {
+                    job.transition(JobStatus::Failed)?;
+                }
                 job.error = Some(error);
             }
         }
         self.repository.save(&job).await?;
-        (self.emit)(job);
+        (self.emit)(job.clone());
+        if job.status == JobStatus::Completed {
+            self.engine.committed(&job).await?;
+        }
         Ok(())
     }
 }

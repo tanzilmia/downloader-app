@@ -1,108 +1,111 @@
 # Downpour architecture
 
-Status: Phase 0 design accepted from the supplied project brief; Phase 1 vertical
-slice in development. Evidence and remaining limits live in `docs/progress.md`.
+Approved stack: Tauri 2, React/TypeScript/Vite, Tailwind/shadcn, React Router,
+Zustand, Rust/Tokio, SQLx/SQLite, Zod and pnpm/Cargo. See ADR 0004 and progress.
 
-## Decisions and alternatives
+## Ownership and flow
 
-Use a Rust workspace inside a pnpm monorepo. The React application owns views,
-transient presentation state and theme. Thin Tauri commands validate inputs and
-delegate to a platform-independent Rust core. SQLite is the desktop source of
-truth. A typed event carries committed job snapshots; UI reconciles events by
-revision and re-fetches the queue after subscribing.
+Startup initialization runs on Tokio while the native event loop stays responsive.
+Commands share one initialization and can retry a repaired startup storage error.
+React owns presentation/theme; thin Tauri commands delegate to `download-core`,
+which has no Tauri dependency. `media-engine` implements replaceable Extractor and
+TransferEngine ports. SQLite is authoritative. Shared Rust/TS fixtures cover old
+mock jobs and real artifacts. Native composes the real adapter; browser stays mock.
 
-A frontend-only queue would be quicker but loses ownership when a webview closes.
-A local HTTP service adds authentication, ports and lifecycle management without
-benefit here. The chosen in-process core avoids both and keeps transport replaceable.
+1. Validate public HTTP(S) URLs in TS/Rust. Verified yt-dlp inspects via a temporary
+   authenticated loopback proxy. Require all DNS answers to be public and connect
+   to a validated socket. Redirects and fragments use the same proxy policy.
+2. Filter non-DRM HTTP formats; pair compatible video/audio streams. Enqueue
+   revalidates the format, using a bounded short-lived metadata cache. Keep only
+   allowlisted downloader inputs in RAM (120-second usable lifetime, 16 MiB cache,
+   at most 32 entries). Never persist signed stream URLs or load remote thumbnails.
+3. Insert queued work; claim indexed FIFO rows with 1–4 workers (default 2).
+   Bounded progress channels feed serialized, persisted revisions before events.
+4. Pipe the inspected stream metadata to yt-dlp through stdin (`--load-info-json -`)
+   and download individual streams to UUID-owned stable partial paths. Avoid
+   another webpage extraction per stream. Metadata excludes cookies/auth headers,
+   output filenames, webpage fallback and unselected/unsupported formats; fragment
+   addresses still require public HTTP(S) destinations. Expired inspections refresh
+   once and validate the saved format before transfer. FFmpeg only
+   receives local inputs with restricted protocols/demuxers, copies codecs and
+   removes metadata. FFprobe verifies requested streams and positive duration.
+5. Hash the nonempty staged file; sync its recovery receipt; publish on the same
+   volume using a no-overwrite hard link. Commit completed output to SQLite before
+   cleaning partial files. Library actions accept job IDs and recheck path/hash.
 
-## Structure
+The loopback proxy is an internal network policy, not an external application
+backend or OS sandbox. HTTPS remains end-to-end TLS. Vetted tools are trusted.
 
-```text
-apps/desktop/
-  src/{components,lib,pages,state}/  React screens and typed bridge
-  src-tauri/{src,capabilities}/     Native composition and commands
-packages/contracts/                Zod schemas, TS types, shared wire fixture
-crates/download-core/
-  src/{domain,extractor,engine,repository,manager,files}.rs
-  migrations/                      Embedded SQLx migrations
-docs/{adr,architecture.md,plan.md,risks.md,progress.md}
-scripts/                           Reproducible environment/contract checks
-```
+## State and recovery
 
-## Flow and ownership
+States: queued → downloading/cancelled; downloading → completed/failed/cancelled/
+queued (interruption); failed/cancelled → queued on explicit retry. Completed is
+terminal. Progress is monotonic per attempt. Cancel persists before signalling
+process groups, and slots remain occupied until work exits. Late output cannot
+complete a cancelled attempt.
 
-1. User submits an authorized public URL. Zod and Rust reject malformed URLs,
-   credentials, IP literals and local/reserved DNS names. Phase 1 makes no request.
-2. `Extractor` inspects media and returns format IDs. The mock adapter supplies
-   deterministic metadata. Enqueue re-inspects and validates the selected format;
-   frontend titles and filenames are never trusted as authority.
-3. Manager inserts a queued job. Scheduler claims FIFO jobs within the configured
-   concurrency bound (1–4, default 2). Each worker gets a cancellation token.
-4. `TransferEngine` reports progress through a bounded channel. Manager persists
-   updates and increments revision before publishing `job:updated` events.
-5. Terminal jobs appear in Library. Mock jobs have `isMock: true` and no output
-   path. Completion represents a simulated transfer, never a real saved file.
+SQLx opens SQLite with WAL, foreign keys, busy timeout and embedded migrations 1/2.
+Existing mock provenance remains. Startup requeues interrupted work before workers
+start. Normal exit cancels and drains workers. Receipts reconcile process crashes
+during publication. Typed `engine:health` reports storage failures; the scheduler
+retries and reconciles stranded rows once storage works. Corrupt DBs are preserved.
+Browser preview has separate validated, versioned localStorage and a single tab.
 
-Core state transitions: queued → downloading/cancelled; downloading →
-completed/failed/cancelled/queued (startup recovery only); failed/cancelled →
-queued (explicit retry). Completed is terminal. Progress is monotonic during an
-attempt. A manager mutex serializes transitions; worker handles remain counted
-until the worker exits, including cancelled workers.
+Real transfer progress includes an optional measured `speedBytesPerSecond` from
+yt-dlp's JSON progress template. Percent maps across streams; speed retains its
+actual bytes/second value. The manager validates and persists rates before events,
+expires samples after three seconds without updates, and clears them on terminal
+states, retry and startup recovery. Optional fields preserve existing job payloads.
+Rows show decimal B/s, KB/s or MB/s; Downloads sums active real transfer rates.
+Processing has no network rate, and simulated transfers never report real speed.
 
-## Persistence and recovery
+## Process, file and desktop boundaries
 
-Create an app-data directory through Tauri's path resolver. SQLx opens SQLite with
-`create_if_missing`, WAL, foreign keys and busy timeout, then runs embedded
-migrations. Job and settings payloads are versioned by database migrations. Job
-status is indexed and constrained; revisions allow the UI to ignore stale events.
-Recovery requeues interrupted downloads at startup before starting scheduling.
-Errors opening/migrating the database fail startup with an actionable error;
-storage must never be silently replaced.
+Find remains interactive during startup/dependency failures and shows lookup
+errors beside the link. Failed tool-manifest loads can retry on Reconnect; startup
+does not spawn executable version probes. Per-use verification still applies.
 
-The browser development adapter uses the same validated contracts and a separate
-versioned localStorage namespace. It is a preview convenience, not the desktop
-persistence implementation. Failed storage writes are reported, not disguised as
-durable success. It also requeues interrupted jobs and enforces concurrency.
+YouTube Shorts/share/watch aliases with a valid video ID use one canonical cache
+key. YouTube tool operations run serially with a five-second gap and a one-second
+extractor request delay. HTTP 429 becomes a typed `rate_limited` error with an
+optional `retryAfterSeconds`. The adapter enforces a local session pause starting
+at 60 seconds, doubling on repeated rejections up to 15 minutes. Webview reload
+does not reset it; process restart does. Successful requests reset the backoff.
+Cached metadata remains usable and other sources are unaffected. Home and preview
+show an explicit countdown without sending an automatic retry. This policy reduces
+repeat requests; it does not guarantee that YouTube removes its upstream block.
 
-## Security boundaries
+The new-download preview hides WebM choices and selects the first remaining MP4
+or M4A format. A source with no remaining choices explains the limitation and
+cannot enqueue a hidden format. Existing WebM history, contracts and engine
+compatibility remain intact; this is a presentation preference.
 
-No remote backend, analytics, remote fonts, remote thumbnails, browser cookie
-access or arbitrary filesystem/shell APIs. CSP permits bundled assets and Tauri
-IPC only; dev-server WebSockets are a development exception. Only local main-window
-event listening is granted. Application commands have explicit ACL permissions.
-Future process execution uses fixed executable paths and argument arrays.
+Tool manifests bind target/version/path/SHA-256. Portable paths stay within their
+package; developer paths are absolute. Verify startup and per execution. Fixed
+argument arrays, reduced environment, disabled cookies/plugins/config/remote
+components, bounded streams, deadlines, group cancellation and disk caps constrain
+execution. File names combine a sanitized bounded title, UUID and allowlisted
+extension. Symlink files/directories and existing destinations are rejected.
+Output volumes must support hard links. Cancelled partials remain for retry.
+Process stdin is bounded to 8 MiB, written while both output pipes drain, and
+closed on completion, cancellation or timeout. No temporary info JSON is created.
 
-URL syntax filtering does not prevent DNS rebinding or redirects. The real adapter
-is gated on DNS/IP/redirect policy and adversarial tests; it remains disabled now.
-Future output management reserves unique job directories, sanitizes filenames,
-uses partial files, checks size/hash and FFprobe output, then finalizes atomically
-on the same volume where possible. No output file is ever executed.
+React escapes text. Production CSP permits local assets and IPC. Capabilities grant
+only application commands and event subscriptions to the local main window. No
+frontend shell/filesystem/network plugin access, sign-in sessions or telemetry.
+Same-user concurrent path replacement and hostile executables require stronger OS
+sandboxing; these checks do not claim that protection.
 
 ## Packaging and mobile
 
-Desktop release sidecars require one vetted binary set per target triple:
-`aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-pc-windows-msvc`,
-`x86_64-unknown-linux-gnu` (arm64 Linux is a later supported target).
-Use Tauri `externalBin` suffixed paths only when verified binaries are staged.
-Do not enable them for mock builds. Sign macOS nested binaries before app signing
-and notarization; Windows uses signed installers; Linux needs a documented glibc
-baseline. Audit FFmpeg build configuration and all redistribution licenses.
+`engines.lock.json` pins official assets and FFmpeg source. Native preparation
+builds local-only FFmpeg without GPL/nonfree/external libraries and retains exact
+source/config/notices. Tauri bundles separate executables as resources. Signing
+nested tools changes bytes: regenerate hashes before signing the containing app.
+See release.md for outstanding qualification. Mobile can reuse core policies but
+needs separate extraction, storage and lifecycle adapters.
 
-Core models/repositories/queue policies can be reused on Android/iOS. Desktop
-yt-dlp processes cannot be assumed to work on mobile: mobile extraction, sandbox
-storage, background scheduling and platform policy require new adapters. Mobile
-is an architectural direction, not a support promise.
-
-## Primary references checked for Phase 0
-
-- [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
-- [Vite integration](https://v2.tauri.app/start/frontend/vite/)
-- [Tauri commands](https://v2.tauri.app/develop/calling-rust/)
-- [Capabilities](https://v2.tauri.app/security/capabilities/)
-- [Sidecar target naming](https://tauri.app/develop/sidecar/)
-- [SQLx SQLite options](https://docs.rs/sqlx/latest/sqlx/sqlite/struct.SqliteConnectOptions.html)
-- [yt-dlp JavaScript runtime/EJS](https://github.com/yt-dlp/yt-dlp/wiki/EJS)
-
-yt-dlp's documented Node minimum is 22; pass `--js-runtimes node` explicitly.
-Prefer a vetted bundled runtime for release rather than relying on developer PATH.
-Extractor registration is not proof that a live site permits or supports every URL.
+Primary references: [Tauri capabilities](https://v2.tauri.app/security/capabilities/),
+[resources](https://v2.tauri.app/reference/config/#resources),
+[SQLx SQLite](https://docs.rs/sqlx/latest/sqlx/sqlite/struct.SqliteConnectOptions.html),
+[yt-dlp/EJS](https://github.com/yt-dlp/yt-dlp/wiki/EJS).

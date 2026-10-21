@@ -1,5 +1,12 @@
 import { useEffect } from 'react';
-import { HashRouter, Link, NavLink, Route, Routes } from 'react-router';
+import {
+  HashRouter,
+  Link,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+} from 'react-router';
 import {
   ArrowDownToLine,
   ArrowUpRight,
@@ -21,11 +28,23 @@ import { Settings } from './pages/settings';
 import { Button } from './components/ui/button';
 
 function Shell() {
+  const { pathname } = useLocation();
+  const currentPage =
+    pathname === '/downloads'
+      ? 'Downloads'
+      : pathname === '/library'
+        ? 'Library'
+        : pathname === '/settings'
+          ? 'Settings'
+          : 'Overview';
   const jobs = useApp((state) => state.jobs);
   const theme = useApp((state) => state.settings.theme);
   const ready = useApp((state) => state.ready);
   const persistence = useApp((state) => state.persistence);
   const error = useApp((state) => state.error);
+  const engine = useApp((state) => state.engine);
+  const engineInfo = useApp((state) => state.engineInfo);
+  const health = useApp((state) => state.health);
   const dismissError = useApp((state) => state.dismissError);
   const activeCount = jobs.filter(
     (job) => job.status === 'queued' || job.status === 'downloading',
@@ -62,15 +81,14 @@ function Shell() {
             downpour<span className="brand-period">.</span>
           </span>
         </Link>
-        <div className="sidebar-caption">A LITTLE MORE OFFLINE.</div>
+        <div className="sidebar-caption">Your offline workspace</div>
         <Button className="new-download-button" asChild>
           <Link to="/" aria-label="New download" title="New download">
             <Plus size={18} />
             <span>New download</span>
-            <span className="keyboard-hint">↗</span>
           </Link>
         </Button>
-        <div className="nav-label">YOUR SPACE</div>
+        <div className="nav-label">Workspace</div>
         <nav aria-label="Main navigation">
           <NavLink to="/" end aria-label="Overview" title="Overview">
             <Leaf size={18} />
@@ -92,13 +110,8 @@ function Shell() {
           <div className="local-card">
             <span>
               <LockKeyhole size={15} />
-              LOCAL FIRST. ALWAYS.
+              Stored on this device
             </span>
-            <p>
-              Your links, your library.
-              <br />
-              Right where they belong.
-            </p>
             <div>
               <span className="status-dot" />
               {ready
@@ -115,7 +128,7 @@ function Shell() {
             </NavLink>
           </nav>
           <div className="sidebar-version">
-            <span>DOWNPOUR / 0.1.0</span>
+            <span>Downpour v0.1.0</span>
             <Leaf size={12} />
           </div>
         </div>
@@ -123,18 +136,18 @@ function Shell() {
       <div className="main-shell">
         <header className="topbar">
           <div className="topbar-breadcrumb">
-            <span>Your space</span>
+            <span>Workspace</span>
             <span>/</span>
-            <span>Made for keeping</span>
+            <span>{currentPage}</span>
           </div>
           <div className="preview-pill">
             <Sparkles size={12} />
-            MOCK PREVIEW
+            {engine === 'mock' ? 'MOCK PREVIEW' : 'LOCAL DOWNLOADS'}
           </div>
           <Link
             className="topbar-help"
             to="/settings"
-            aria-label="About this preview"
+            aria-label="Help and app information"
           >
             <CircleHelp size={18} />
           </Link>
@@ -160,6 +173,18 @@ function Shell() {
                 Retry startup
               </Button>
             )}
+          </div>
+        ) : null}
+        {health || (ready && !engineInfo.available) ? (
+          <div className="app-error" role="alert">
+            <span>{health?.message ?? engineInfo.message}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.location.reload()}
+            >
+              Reconnect
+            </Button>
           </div>
         ) : null}
         <main id="main-content" tabIndex={-1}>

@@ -19,6 +19,8 @@ import { Button } from '../components/ui/button';
 export function Settings() {
   const saved = useApp((state) => state.settings);
   const persistence = useApp((state) => state.persistence);
+  const engine = useApp((state) => state.engine);
+  const engineInfo = useApp((state) => state.engineInfo);
   const saveSettings = useApp((state) => state.saveSettings);
   const [draft, setDraft] = useState(saved);
   const [pending, setPending] = useState(false);
@@ -48,12 +50,14 @@ export function Settings() {
     <div className="page settings-page">
       <div className="page-top">
         <span className="eyebrow">MAKE YOURSELF AT HOME</span>
-        <span className="local-label">v0.1.0 · Foundation</span>
+        <span className="local-label">
+          v0.1.0 · {engine === 'mock' ? 'Browser preview' : 'Desktop'}
+        </span>
       </div>
       <div className="screen-heading">
         <div>
-          <h1>Just your way.</h1>
-          <p>A few small things to make Downpour feel like you.</p>
+          <h1>Settings.</h1>
+          <p>Make Downpour work the way you like.</p>
         </div>
       </div>
       <section className="settings-section">
@@ -146,12 +150,39 @@ export function Settings() {
             <HardDrive size={19} />
             <span>
               Download engine
-              <small>
-                Simulated metadata and transfers. No real files are created.
-              </small>
+              <small>{engineInfo.message}</small>
             </span>
-            <span className="info-pill">MOCK</span>
+            <span className="info-pill">
+              {engine === 'mock'
+                ? 'MOCK'
+                : engineInfo.available
+                  ? 'READY'
+                  : 'UNAVAILABLE'}
+            </span>
           </div>
+          {engineInfo.outputDirectory ? (
+            <div>
+              <HardDrive size={19} />
+              <span>
+                Download folder
+                <small className="output-path">
+                  {engineInfo.outputDirectory}
+                </small>
+              </span>
+            </div>
+          ) : null}
+          {engineInfo.tools.length ? (
+            <div className="engine-versions">
+              <span>
+                Media tools
+                <small>
+                  {engineInfo.tools
+                    .map((tool) => `${tool.name}: ${tool.version}`)
+                    .join('\n')}
+                </small>
+              </span>
+            </div>
+          ) : null}
           <div>
             <ShieldCheck size={19} />
             <span>

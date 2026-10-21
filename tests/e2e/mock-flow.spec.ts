@@ -140,7 +140,11 @@ test('preserves corrupt preview storage and reports a startup error', async ({
   await expect(
     page.getByRole('button', { name: 'Retry startup' }),
   ).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Find video' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Find video' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Try a sample link' }).click();
+  await page.getByRole('button', { name: 'Find video' }).click();
+  await expect(page.locator('#url-error')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Find video' })).toBeEnabled();
   expect(
     await page.evaluate(() => localStorage.getItem('downpour.browser.v1')),
   ).toBe('{broken');
