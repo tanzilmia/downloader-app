@@ -6,9 +6,9 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if !(3..=4).contains(&args.len()) {
+    if !(3..=5).contains(&args.len()) {
         return Err(
-            "usage: live_download <engine.json> <output-directory> <authorized-public-url> [format-id]".into(),
+            "usage: live_download <engine.json> <default-output-directory> <authorized-public-url> [format-id] [selected-download-folder]".into(),
         );
     }
     let output = PathBuf::from(&args[1]);
@@ -34,6 +34,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
     )
     .await?;
+    if let Some(directory) = args.get(4) {
+        let directory =
+            media_engine::files::FileStore::check_destination(std::path::Path::new(directory))
+                .await?;
+        manager
+            .set_download_directory(Some(
+                directory
+                    .to_str()
+                    .ok_or("Download folder must be UTF-8")?
+                    .to_owned(),
+            ))
+            .await?;
+    }
     let format = args.get(3).unwrap_or(&media.formats[0].id);
     let job = manager.enqueue(&media.url, format).await?;
     let scheduler = manager.start();
@@ -55,7 +68,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     manager.stop().await;
     scheduler.await?;
     let completed = result?;
-    let path = backend.files().validate_output(&completed, true).await?;
+    let path = backend
+        .files_for(&completed)
+        .await?
+        .validate_output(&completed, true)
+        .await?;
     println!("Verified saved output: {}", path.display());
     println!("{}", serde_json::to_string_pretty(&completed.output)?);
     repository.close().await;

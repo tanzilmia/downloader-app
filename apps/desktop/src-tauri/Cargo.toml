@@ -20,6 +20,7 @@ tauri = { version = "2", features = [] }
 download-core = { path = "../../../crates/download-core" }
 media-engine = { path = "../../../crates/media-engine" }
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 tauri-plugin-webdriver = { version = "0.2", optional = true }
 serde.workspace = true
 tokio.workspace = true

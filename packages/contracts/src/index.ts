@@ -139,11 +139,13 @@ export const jobSchema = z.object({
   error: errorSchema.nullable(),
   isMock: z.boolean(),
   output: outputSchema.optional(),
+  downloadDirectory: z.string().min(1).max(4096).optional(),
 });
 export type Job = z.infer<typeof jobSchema>;
 export const settingsSchema = z.object({
   concurrency: z.number().int().min(1).max(4),
   theme: z.enum(['light', 'dark', 'system']),
+  downloadDirectory: z.string().min(1).max(4096).optional(),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaultSettings: Settings = { concurrency: 2, theme: 'dark' };
@@ -178,6 +180,10 @@ export const commandSchemas = {
   cancel_job: { input: idSchema, output: jobSchema },
   retry_job: { input: idSchema, output: jobSchema },
   update_settings: { input: settingsSchema, output: settingsSchema },
+  choose_download_directory: {
+    input: z.object({ reset: z.boolean() }).strict(),
+    output: snapshotSchema.nullable(),
+  },
   open_output: {
     input: idSchema.extend({ reveal: z.boolean() }),
     output: z.null(),

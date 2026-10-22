@@ -25,16 +25,16 @@ has been extended with the user-approved real downloader and release preparation
 
 | Check                                                   | Result                                                                  |
 | ------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `pnpm check`                                            | Formatting, lint, types, 47 Vitest checks and production web build pass |
+| `pnpm check`                                            | Formatting, lint, types, 49 Vitest checks and production web build pass |
 | `pnpm test:e2e`                                         | 9 browser workflow/keyboard/persistence/axe checks pass                 |
 | `cargo fmt --all -- --check`                            | Pass                                                                    |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass                                                                    |
-| `cargo test --workspace`                                | 48 Rust checks pass                                                     |
+| `cargo test --workspace`                                | 52 Rust checks pass                                                     |
 | `pnpm audit --prod`                                     | No known vulnerabilities                                                |
 | `pnpm test:native:build` / native flow                  | Actual WKWebView suite passes; evidence below                           |
 | `pnpm engine:portable` / `pnpm desktop:bundle`          | Verified engine staged, unsigned macOS app built                        |
 
-104 deterministic unit/integration/browser tests, plus opt-in native and live
+110 deterministic unit/integration/browser tests, plus opt-in native and live
 integration runs. Tests include shared old/real contracts, migration/reopen,
 terminal-state races, process timeout/output overflow/descendant termination,
 network policy, file tampering/symlinks/collision/receipt crash recovery and 200
@@ -327,3 +327,50 @@ Independent FFprobe/hash evidence: `output/release/audio-options-live/report.jso
 Logs: `output/release/audio-options-{check,rust,clippy,e2e,live,ui,accessibility}.log`.
 UI fixtures: `output/playwright/audio-options-{dark,light,narrow}.png`.
 Portable build: `output/release/audio-options-bundle.log`.
+
+## User-selected download locations
+
+Settings → Download location → Choose folder opens the native folder picker.
+The real-download preview also shows Save to / Change, so a destination can be
+chosen before enqueueing. Folder changes save immediately, survive restart and
+leave unsaved appearance/concurrency edits intact. Cancel keeps the old folder;
+Use default restores the original destination. Browser preview explicitly disables
+native folder selection.
+
+Optional `downloadDirectory` fields in settings and each job preserve existing
+JSON/SQLite payloads without a database reset. New jobs capture the preference
+under the manager lock. Already queued/active jobs and retry/resume use their
+recorded destination. Legacy jobs retain the original default root. Snapshots
+report the effective destination. Open/reveal, receipt recovery, publication,
+commit cleanup and discarded-output validation resolve the job's own file store.
+Missing selected folders are never recreated automatically, and replacement
+symlinks cannot redirect a stored destination.
+
+The dialog uses a narrow local-main-window application command accepting only a
+reset flag. Paths come from the native picker; ordinary update_settings cannot
+change them. The selected existing directory is canonicalized, checked for UTF-8,
+write/sync access and atomic-link support with uniquely named probes that are
+removed afterwards. The user-selected folder's permissions are not changed.
+The dialog plugin's generic frontend filesystem/dialog commands are not granted.
+
+`pnpm check` (49 unit checks), all 9 existing browser workflows, Rust formatting,
+Clippy and 52 Rust checks pass. New checks cover backwards-compatible contracts,
+per-job folder pinning across changes/retry/reopen/reset, preference-path injection,
+missing/changed folders and owned outputs across different roots. CLI UI evidence
+covers cancellation, inline failure, pending guards, reset, draft preservation,
+Settings and preview layouts. Active-dialog and Settings axe scans pass in both
+themes at 360, 540 and 1280 pixels after rendering settles.
+
+Actual public Sintel audio download to a selected folder containing spaces and
+Bengali characters succeeded: 833,206 bytes, SHA-256
+`b48c9b804f1fe5e01e79ae3b2cc041eb620fbab9e633b193d33bfbf63642a92f`.
+Evidence: `output/release/download-folder-live/report.json`.
+Native WKWebView evidence:
+`output/native-e2e/folders-abb9ac56-16d2-4dd2-b521-72dc23509982/report.json`.
+It verifies the selected folder after restart, native default reset, and successful
+ID/hash-checked folder reveal of the existing custom output after reset/restart.
+Picker selection/cancellation UI responses were controlled browser fixtures; the
+platform picker itself uses the compiled Tauri dialog plugin.
+
+Logs: `output/release/download-folder-{check,rust,clippy,e2e,live,ui,native,native-build,bundle}.log`.
+Screens: `output/playwright/download-folder-{settings-dark,settings-light,preview,preview-narrow}.png`.

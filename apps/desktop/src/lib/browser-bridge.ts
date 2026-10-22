@@ -127,6 +127,10 @@ export class BrowserBridge implements Bridge {
     this.load();
     let output: unknown;
     switch (command) {
+      case 'choose_download_directory':
+        throw new Error(
+          'Choose a download folder in the desktop app. Browser preview does not save files.',
+        );
       case 'open_output':
         throw new Error(
           'Saved files are available in the desktop application.',

@@ -24,6 +24,7 @@ pub fn run() {
     }));
     let app = builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let directory = app.path().app_data_dir()?;
             #[cfg(feature = "native-e2e")]
@@ -82,7 +83,8 @@ pub fn run() {
             commands::cancel_job,
             commands::retry_job,
             commands::update_settings,
-            commands::open_output
+            commands::open_output,
+            commands::choose_download_directory
         ])
         .build(app_context())
         .expect(

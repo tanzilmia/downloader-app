@@ -132,6 +132,8 @@ pub struct Job {
     pub is_mock: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<OutputFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_directory: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -186,6 +188,8 @@ impl Job {
 pub struct Settings {
     pub concurrency: u8,
     pub theme: Theme,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_directory: Option<String>,
 }
 
 impl Default for Settings {
@@ -193,6 +197,7 @@ impl Default for Settings {
         Self {
             concurrency: 2,
             theme: Theme::Dark,
+            download_directory: None,
         }
     }
 }
@@ -202,6 +207,11 @@ impl Settings {
             return Err(AppError::validation(
                 "Choose between 1 and 4 simultaneous downloads.",
             ));
+        }
+        if self.download_directory.as_ref().is_some_and(|path| {
+            path.is_empty() || path.len() > 4096 || path.chars().any(char::is_control)
+        }) {
+            return Err(AppError::validation("Choose a valid download folder."));
         }
         Ok(())
     }

@@ -115,12 +115,17 @@ impl DownloadManager {
     }
     pub async fn snapshot(&self) -> Result<Snapshot, AppError> {
         let _guard = self.runtime.lock().await;
+        let settings = self.repository.settings().await?;
+        let mut engine_info = self.engine.info();
+        if settings.download_directory.is_some() {
+            engine_info.output_directory = settings.download_directory.clone();
+        }
         Ok(Snapshot {
             jobs: self.repository.list().await?,
-            settings: self.repository.settings().await?,
+            settings,
             engine: self.engine.name().into(),
             persistence: "sqlite".into(),
-            engine_info: self.engine.info(),
+            engine_info,
             health: self.health.lock().expect("health lock").clone(),
         })
     }
@@ -139,6 +144,8 @@ impl DownloadManager {
             .find(|f| f.id == format_id)
             .cloned()
             .ok_or_else(|| AppError::validation("Choose an available media format."))?;
+        let _guard = self.runtime.lock().await;
+        let download_directory = self.repository.settings().await?.download_directory;
         let timestamp = now();
         let job = Job {
             id: uuid::Uuid::new_v4().to_string(),
@@ -154,8 +161,8 @@ impl DownloadManager {
             updated_at: timestamp,
             error: None,
             output: None,
+            download_directory,
         };
-        let _guard = self.runtime.lock().await;
         self.repository.insert(&job).await?;
         (self.emit)(job.clone());
         Ok(job)
@@ -188,8 +195,21 @@ impl DownloadManager {
     }
     pub async fn update_settings(&self, settings: Settings) -> Result<Settings, AppError> {
         let _guard = self.runtime.lock().await;
+        if settings.download_directory != self.repository.settings().await?.download_directory {
+            return Err(AppError::validation(
+                "Use the folder picker to change your download location.",
+            ));
+        }
         self.repository.save_settings(&settings).await?;
         Ok(settings)
+    }
+    /// Desktop calls this only after the native picker has selected and checked
+    /// a destination. Jobs already in the queue retain their recorded location.
+    pub async fn set_download_directory(&self, directory: Option<String>) -> Result<(), AppError> {
+        let _guard = self.runtime.lock().await;
+        let mut settings = self.repository.settings().await?;
+        settings.download_directory = directory;
+        self.repository.save_settings(&settings).await
     }
     async fn schedule(self: &Arc<Self>) -> Result<(), AppError> {
         let mut runtime = self.runtime.lock().await;

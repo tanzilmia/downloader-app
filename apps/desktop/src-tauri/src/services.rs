@@ -4,7 +4,7 @@ use download_core::{
 };
 use media_engine::ytdlp::YtdlpBackend;
 use std::{path::PathBuf, sync::Arc};
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex, OnceCell};
 use tokio_util::sync::CancellationToken;
 
 pub struct Runtime {
@@ -15,6 +15,7 @@ pub struct Runtime {
 /// Initialization runs on Tokio, keeping the macOS event loop free for webview
 /// creation and OS permission prompts. Commands await the same initialization.
 pub struct Services {
+    pub destination_change: Mutex<()>,
     manifest: PathBuf,
     output: PathBuf,
     database: PathBuf,
@@ -33,6 +34,7 @@ impl Services {
         health: HealthSink,
     ) -> Arc<Self> {
         Arc::new(Self {
+            destination_change: Mutex::new(()),
             manifest,
             output,
             database,

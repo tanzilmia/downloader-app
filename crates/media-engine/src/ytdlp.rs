@@ -54,6 +54,9 @@ impl YtdlpBackend {
     pub fn files(&self) -> &FileStore {
         &self.files
     }
+    pub async fn files_for(&self, job: &Job) -> Result<FileStore, AppError> {
+        self.files.for_job(job).await
+    }
     async fn toolchain(&self) -> Result<&Toolchain, AppError> {
         self.tools
             .get_or_try_init(|| async {
@@ -200,7 +203,8 @@ impl YtdlpBackend {
         for name in ["yt-dlp", "deno", "ffmpeg", "ffprobe"] {
             verify(tools.tool(name)).await?;
         }
-        if let Some(output) = self.files.recover(&job, &cancel).await? {
+        let files = self.files_for(&job).await?;
+        if let Some(output) = files.recover(&job, &cancel).await? {
             return Ok(Some(output));
         }
         let inspection = self.inspection(&job.media.url, cancel.clone()).await?;
@@ -211,7 +215,7 @@ impl YtdlpBackend {
         }) {
             return Err(failure(ErrorCode::Unsupported, "The selected format is no longer available. Inspect the link and choose a format again.", false));
         }
-        let directory = self.files.prepare(&job).await?;
+        let directory = files.prepare(&job).await?;
         let parts = metadata::format_parts(&job.format.id)?;
         let proxy = PublicProxy::start().await?;
         let mut sources: Vec<PathBuf> = vec![];
@@ -418,7 +422,7 @@ impl YtdlpBackend {
                     true,
                 )
             })?;
-        self.files
+        files
             .publish(&job, &staged, duration, &cancel)
             .await
             .map(Some)
@@ -499,10 +503,10 @@ impl TransferEngine for YtdlpBackend {
         if job.is_mock {
             Ok(())
         } else {
-            self.files.committed(job).await
+            self.files_for(job).await?.committed(job).await
         }
     }
     async fn discard(&self, job: &Job, output: &OutputFile) -> Result<(), AppError> {
-        self.files.discard(job, output).await
+        self.files_for(job).await?.discard(job, output).await
     }
 }

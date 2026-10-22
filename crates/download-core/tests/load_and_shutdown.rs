@@ -146,6 +146,7 @@ async fn two_hundred_queued_jobs_stay_bounded_and_shutdown_remains_resumable() {
         .update_settings(Settings {
             concurrency: 4,
             theme: Theme::Dark,
+            ..Settings::default()
         })
         .await
         .unwrap();

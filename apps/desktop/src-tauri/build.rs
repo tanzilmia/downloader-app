@@ -8,6 +8,7 @@ fn main() {
             "retry_job",
             "update_settings",
             "open_output",
+            "choose_download_directory",
         ]),
     ))
     .expect("could not build Tauri application manifest");

@@ -35,6 +35,7 @@ import { JobList } from '../components/job-list';
 import { EmptyState } from '../components/empty-state';
 import { RequestPause } from '../components/request-pause';
 import { useRetryPause } from '../lib/use-retry-pause';
+import { DownloadFolder } from '../components/download-folder';
 
 function PreviewDialog({
   media,
@@ -52,6 +53,7 @@ function PreviewDialog({
     { title: 'Video', icon: MonitorPlay, audioOnly: false },
   ];
   const [pending, setPending] = useState(false);
+  const [choosingFolder, setChoosingFolder] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const upsert = useApp((state) => state.upsert);
   const navigate = useNavigate();
@@ -60,6 +62,7 @@ function PreviewDialog({
     if (
       !media ||
       pending ||
+      choosingFolder ||
       pause.seconds ||
       !formats.some((format) => format.id === selected)
     )
@@ -85,7 +88,7 @@ function PreviewDialog({
     <Dialog.Root
       open={!!media}
       onOpenChange={(open) => {
-        if (!open && !pending) onClose();
+        if (!open && !pending && !choosingFolder) onClose();
       }}
     >
       <Dialog.Portal>
@@ -104,7 +107,7 @@ function PreviewDialog({
                 variant="ghost"
                 size="icon"
                 aria-label="Close preview"
-                disabled={pending}
+                disabled={pending || choosingFolder}
               >
                 <X size={19} />
               </Button>
@@ -218,11 +221,23 @@ function PreviewDialog({
                 seconds={pause.seconds}
                 id="preview-youtube-pause"
               />
+              {!media.isMock ? (
+                <DownloadFolder
+                  compact
+                  disabled={pending}
+                  onPendingChange={setChoosingFolder}
+                />
+              ) : null}
               <Button
                 className="w-full"
                 data-testid="enqueue"
                 onClick={() => void enqueue()}
-                disabled={pending || pause.seconds > 0 || !formats.length}
+                disabled={
+                  pending ||
+                  choosingFolder ||
+                  pause.seconds > 0 ||
+                  !formats.length
+                }
                 aria-describedby={
                   pause.seconds ? 'preview-youtube-pause' : undefined
                 }

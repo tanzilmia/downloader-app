@@ -63,6 +63,68 @@ pub async fn update_settings(
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ChooseDirectoryInput {
+    reset: bool,
+}
+
+#[tauri::command]
+pub async fn choose_download_directory<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    services: Services<'_>,
+    input: ChooseDirectoryInput,
+) -> Result<Option<Snapshot>, AppError> {
+    use media_engine::files::FileStore;
+    use tauri_plugin_dialog::DialogExt;
+    let _selection = services
+        .destination_change
+        .try_lock()
+        .map_err(|_| AppError::validation("A folder selection is already open."))?;
+    let runtime = services.get().await?;
+    let engine = runtime.engine.as_ref().ok_or_else(|| {
+        AppError::validation("Download folders are available with the desktop media engine.")
+    })?;
+    let directory = if input.reset {
+        FileStore::check_destination(engine.files().root()).await?;
+        None
+    } else {
+        let snapshot = runtime.manager.snapshot().await?;
+        let mut picker = window
+            .dialog()
+            .file()
+            .set_title("Choose download folder")
+            .set_parent(&window);
+        if let Some(directory) = snapshot.engine_info.output_directory {
+            picker = picker.set_directory(directory);
+        }
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        picker.pick_folder(move |folder| {
+            let _ = sender.send(folder);
+        });
+        let folder = receiver.await.map_err(|_| {
+            AppError::validation("The folder picker closed unexpectedly. Try again.")
+        })?;
+        let Some(folder) = folder else {
+            return Ok(None);
+        };
+        let folder = folder
+            .into_path()
+            .map_err(|_| AppError::validation("Choose a local download folder."))?;
+        let folder = FileStore::check_destination(&folder).await?;
+        Some(
+            folder
+                .to_str()
+                .ok_or_else(|| {
+                    AppError::validation("The folder name cannot be used. Choose another folder.")
+                })?
+                .to_owned(),
+        )
+    };
+    runtime.manager.set_download_directory(directory).await?;
+    runtime.manager.snapshot().await.map(Some)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OpenInput {
     id: String,
     reveal: bool,
@@ -86,7 +148,11 @@ pub async fn open_output(
         .engine
         .as_ref()
         .ok_or_else(|| AppError::validation("No real engine is available."))?;
-    let path = engine.files().validate_output(&job, true).await?;
+    let path = engine
+        .files_for(&job)
+        .await?
+        .validate_output(&job, true)
+        .await?;
     if input.reveal {
         app.opener()
             .reveal_item_in_dir(path)
@@ -135,7 +201,8 @@ mod tests {
                 enqueue_job,
                 cancel_job,
                 retry_job,
-                update_settings
+                update_settings,
+                choose_download_directory
             ])
             .build(crate::app_context())
             .unwrap();
@@ -162,6 +229,23 @@ mod tests {
             .deserialize::<Snapshot>()
             .unwrap();
         assert_eq!(response.persistence, "sqlite");
+        for body in [
+            json!({"input":{"reset":false,"path":"/arbitrary"}}),
+            json!({"input":{"reset":true}}),
+        ] {
+            assert!(
+                get_ipc_response(&main, request("choose_download_directory", body, local)).is_err()
+            );
+        }
+        assert!(get_ipc_response(
+            &main,
+            request(
+                "update_settings",
+                json!({"input":{"concurrency":2,"theme":"dark","downloadDirectory":"/arbitrary"}}),
+                local
+            )
+        )
+        .is_err());
         assert!(get_ipc_response(
             &main,
             request(

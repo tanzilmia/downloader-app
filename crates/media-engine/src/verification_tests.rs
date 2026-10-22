@@ -69,6 +69,101 @@ async fn fixture_manifest(root: &Path) -> std::path::PathBuf {
     manifest
 }
 
+#[tokio::test]
+async fn selected_download_folders_preserve_old_outputs_and_use_owned_paths() {
+    let temporary = tempfile::tempdir().unwrap();
+    let default = temporary.path().join("default");
+    let chosen = temporary.path().join("chosen");
+    tokio::fs::create_dir(&chosen).await.unwrap();
+    let chosen = FileStore::check_destination(&chosen).await.unwrap();
+    assert!(tokio::fs::read_dir(&chosen)
+        .await
+        .unwrap()
+        .next_entry()
+        .await
+        .unwrap()
+        .is_none());
+    let store = FileStore::new(&default).await.unwrap();
+    let mut old = job();
+    let mut new = job();
+    new.id = uuid::Uuid::new_v4().to_string();
+    new.download_directory = Some(chosen.to_str().unwrap().to_owned());
+    for current in [&mut old, &mut new] {
+        let files = store.for_job(current).await.unwrap();
+        let work = files.prepare(current).await.unwrap();
+        let staged = work.join(format!("verified.{}", current.format.extension));
+        tokio::fs::write(&staged, b"owned test output")
+            .await
+            .unwrap();
+        current.output = Some(
+            files
+                .publish(current, &staged, 1.0, &CancellationToken::new())
+                .await
+                .unwrap(),
+        );
+    }
+    assert!(store
+        .for_job(&old)
+        .await
+        .unwrap()
+        .validate_output(&old, true)
+        .await
+        .unwrap()
+        .starts_with(store.root()));
+    let selected = store.for_job(&new).await.unwrap();
+    assert!(selected
+        .validate_output(&new, true)
+        .await
+        .unwrap()
+        .starts_with(&chosen));
+    selected.committed(&new).await.unwrap();
+    assert!(selected.validate_output(&new, true).await.is_ok());
+    assert!(store.validate_output(&new, true).await.is_err());
+    let mut forged = new.clone();
+    forged.download_directory = Some(store.root().to_str().unwrap().to_owned());
+    assert!(store
+        .for_job(&forged)
+        .await
+        .unwrap()
+        .validate_output(&forged, true)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn missing_or_replaced_selected_folders_are_never_recreated_or_redirected() {
+    let temporary = tempfile::tempdir().unwrap();
+    let store = FileStore::new(&temporary.path().join("default"))
+        .await
+        .unwrap();
+    let missing = temporary.path().join("missing");
+    let mut current = job();
+    current.download_directory = Some(missing.to_str().unwrap().into());
+    assert!(store.for_job(&current).await.is_err());
+    assert!(FileStore::check_destination(&missing).await.is_err());
+    assert!(!missing.exists());
+    let file = temporary.path().join("file");
+    tokio::fs::write(&file, b"file").await.unwrap();
+    assert!(FileStore::check_destination(&file).await.is_err());
+    assert!(FileStore::check_destination(Path::new("relative/folder"))
+        .await
+        .is_err());
+    #[cfg(unix)]
+    {
+        let other = temporary.path().join("other");
+        tokio::fs::create_dir(&other).await.unwrap();
+        std::os::unix::fs::symlink(&other, &missing).unwrap();
+        assert!(store.for_job(&current).await.is_err());
+        assert!(tokio::fs::read_dir(&other)
+            .await
+            .unwrap()
+            .next_entry()
+            .await
+            .unwrap()
+            .is_none());
+    }
+}
+
 #[cfg(unix)]
 async fn scripted_backend(root: &Path, response: &str, exit: u8) -> crate::ytdlp::YtdlpBackend {
     use std::os::unix::fs::PermissionsExt;

@@ -24,6 +24,61 @@ impl FileStore {
     pub fn root(&self) -> &Path {
         &self.root
     }
+    /// A queued job owns its destination, independently of later preferences.
+    /// Never recreate a missing selected folder (for example an unplugged drive)
+    /// or follow a replacement symlink to a different destination.
+    pub async fn for_job(&self, job: &Job) -> Result<Self, AppError> {
+        let Some(directory) = &job.download_directory else {
+            return Ok(self.clone());
+        };
+        let path = Path::new(directory);
+        let canonical = tokio::fs::canonicalize(path).await.map_err(|_| {
+            failure(ErrorCode::Storage, "The download folder is unavailable. Reconnect the drive or restore the folder, then retry.", true)
+        })?;
+        if !path.is_absolute() || canonical != path || !canonical.is_dir() {
+            return Err(failure(ErrorCode::Storage, "The download folder has moved or changed. Restore its original location before retrying.", false));
+        }
+        Ok(Self { root: canonical })
+    }
+    /// Check a picker-selected existing folder without changing its permissions.
+    /// Publication requires write access and same-volume hard links.
+    pub async fn check_destination(path: &Path) -> Result<PathBuf, AppError> {
+        let invalid = || {
+            failure(ErrorCode::Storage, "This folder cannot safely save downloads. Choose a different writable folder or drive.", true)
+        };
+        if !path.is_absolute() {
+            return Err(invalid());
+        }
+        let root = tokio::fs::canonicalize(path).await.map_err(|_| invalid())?;
+        if !root.is_dir() || root.to_str().is_none() {
+            return Err(invalid());
+        }
+        let probe = root.join(format!(".downpour-check-{}", uuid::Uuid::new_v4()));
+        let link = probe.with_extension("link");
+        let mut file = tokio::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&probe)
+            .await
+            .map_err(|_| invalid())?;
+        let result = async {
+            file.write_all(b"Downpour folder check").await?;
+            file.sync_all().await?;
+            tokio::fs::hard_link(&probe, &link).await
+        }
+        .await;
+        drop(file);
+        let removed = tokio::fs::remove_file(&probe).await;
+        let unlinked = if result.is_ok() {
+            tokio::fs::remove_file(&link).await
+        } else {
+            Ok(())
+        };
+        result.map_err(|_| invalid())?;
+        removed.map_err(|_| invalid())?;
+        unlinked.map_err(|_| invalid())?;
+        Ok(root)
+    }
     fn job_dir(&self, job: &Job) -> Result<PathBuf, AppError> {
         let id = uuid::Uuid::parse_str(&job.id)
             .map_err(|_| failure(ErrorCode::Validation, "Invalid download identity.", false))?;

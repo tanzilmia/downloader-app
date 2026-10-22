@@ -15,6 +15,7 @@ import {
 } from '@downpour/contracts';
 import { useApp } from '../state/app';
 import { Button } from '../components/ui/button';
+import { DownloadFolder } from '../components/download-folder';
 
 export function Settings() {
   const saved = useApp((state) => state.settings);
@@ -24,6 +25,7 @@ export function Settings() {
   const saveSettings = useApp((state) => state.saveSettings);
   const [draft, setDraft] = useState(saved);
   const [pending, setPending] = useState(false);
+  const [choosingFolder, setChoosingFolder] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dirty =
@@ -60,6 +62,22 @@ export function Settings() {
           <p>Make Downpour work the way you like.</p>
         </div>
       </div>
+      <section className="settings-section">
+        <div className="settings-intro">
+          <h2>Download location</h2>
+          <p>Choose where your videos and audio are saved.</p>
+        </div>
+        <DownloadFolder
+          disabled={pending}
+          onPendingChange={setChoosingFolder}
+          onChange={(settings) =>
+            setDraft((current) => ({
+              ...current,
+              downloadDirectory: settings.downloadDirectory,
+            }))
+          }
+        />
+      </section>
       <section className="settings-section">
         <div className="settings-intro">
           <h2>Look & feel</h2>
@@ -160,17 +178,6 @@ export function Settings() {
                   : 'UNAVAILABLE'}
             </span>
           </div>
-          {engineInfo.outputDirectory ? (
-            <div>
-              <HardDrive size={19} />
-              <span>
-                Download folder
-                <small className="output-path">
-                  {engineInfo.outputDirectory}
-                </small>
-              </span>
-            </div>
-          ) : null}
           {engineInfo.tools.length ? (
             <div className="engine-versions">
               <span>
@@ -210,7 +217,10 @@ export function Settings() {
             <p>Preferences are saved locally.</p>
           )}
         </div>
-        <Button disabled={!dirty || pending} onClick={() => void save()}>
+        <Button
+          disabled={!dirty || pending || choosingFolder}
+          onClick={() => void save()}
+        >
           {pending ? <Loader2 className="spin" size={16} /> : null}
           {pending ? 'Saving…' : 'Save preferences'}
         </Button>

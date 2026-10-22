@@ -15,6 +15,116 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 const URL: &str = "https://www.youtube.com/watch?v=BaW_jenozKc";
+
+#[tokio::test]
+async fn download_folders_are_persisted_per_job_across_changes_retries_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("folders.db");
+    let repository = Repository::open(&path).await.unwrap();
+    let first = manager(repository.clone(), Arc::new(MockEngine::default())).await;
+    let legacy = first.enqueue(URL, "mock-1080p").await.unwrap();
+    assert_eq!(legacy.download_directory, None);
+    first
+        .set_download_directory(Some("/selected/one".into()))
+        .await
+        .unwrap();
+    let selected = first.enqueue(URL, "mock-1080p").await.unwrap();
+    first
+        .set_download_directory(Some("/selected/two".into()))
+        .await
+        .unwrap();
+    let second = first.enqueue(URL, "mock-audio").await.unwrap();
+    assert_eq!(
+        first
+            .snapshot()
+            .await
+            .unwrap()
+            .engine_info
+            .output_directory
+            .as_deref(),
+        Some("/selected/two")
+    );
+    first.cancel(&selected.id).await.unwrap();
+    let retried = first.retry(&selected.id).await.unwrap();
+    assert_eq!(retried.download_directory.as_deref(), Some("/selected/one"));
+    assert_eq!(
+        first
+            .job(&second.id)
+            .await
+            .unwrap()
+            .download_directory
+            .as_deref(),
+        Some("/selected/two")
+    );
+    repository.close().await;
+    drop(first);
+    let repository = Repository::open(&path).await.unwrap();
+    let reopened = manager(repository.clone(), Arc::new(MockEngine::default())).await;
+    assert_eq!(
+        reopened
+            .snapshot()
+            .await
+            .unwrap()
+            .settings
+            .download_directory
+            .as_deref(),
+        Some("/selected/two")
+    );
+    assert_eq!(
+        reopened
+            .job(&selected.id)
+            .await
+            .unwrap()
+            .download_directory
+            .as_deref(),
+        Some("/selected/one")
+    );
+    reopened.set_download_directory(None).await.unwrap();
+    assert_eq!(
+        reopened
+            .enqueue(URL, "mock-audio")
+            .await
+            .unwrap()
+            .download_directory,
+        None
+    );
+    assert_eq!(
+        reopened.job(&legacy.id).await.unwrap().download_directory,
+        None
+    );
+    repository.close().await;
+}
+
+#[tokio::test]
+async fn normal_preferences_cannot_replace_a_picker_selected_download_folder() {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = Repository::open(&directory.path().join("guard.db"))
+        .await
+        .unwrap();
+    let app = manager(repository.clone(), Arc::new(MockEngine::default())).await;
+    app.set_download_directory(Some("/selected/one".into()))
+        .await
+        .unwrap();
+    assert!(app.update_settings(Settings::default()).await.is_err());
+    for invalid in ["", "bad\nfolder", "bad\0folder"] {
+        assert!(app
+            .set_download_directory(Some(invalid.into()))
+            .await
+            .is_err());
+    }
+    let saved = app
+        .update_settings(Settings {
+            concurrency: 3,
+            theme: Theme::Light,
+            download_directory: Some("/selected/one".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(saved.download_directory.as_deref(), Some("/selected/one"));
+    assert_eq!(saved.concurrency, 3);
+    repository.close().await;
+}
+
 #[tokio::test]
 async fn real_artifact_contract_survives_database_reopen() {
     let job: Job = serde_json::from_str(include_str!(
@@ -107,6 +217,7 @@ async fn fresh_database_migrates_reopens_and_recovers_interrupted_jobs() {
         .update_settings(Settings {
             concurrency: 1,
             theme: Theme::Light,
+            ..Settings::default()
         })
         .await
         .unwrap();
@@ -127,7 +238,8 @@ async fn fresh_database_migrates_reopens_and_recovers_interrupted_jobs() {
         recovered.settings,
         Settings {
             concurrency: 1,
-            theme: Theme::Light
+            theme: Theme::Light,
+            ..Settings::default()
         }
     );
     assert_eq!(recovered.jobs[0].status, JobStatus::Queued);
@@ -213,6 +325,7 @@ async fn queue_bounds_concurrency_and_cancel_does_not_complete() {
         .update_settings(Settings {
             concurrency: 1,
             theme: Theme::Dark,
+            ..Settings::default()
         })
         .await
         .unwrap();
@@ -298,7 +411,8 @@ async fn classified_failure_can_be_retried_and_inputs_are_revalidated() {
     assert!(manager
         .update_settings(Settings {
             concurrency: 5,
-            theme: Theme::Dark
+            theme: Theme::Dark,
+            ..Settings::default()
         })
         .await
         .is_err());

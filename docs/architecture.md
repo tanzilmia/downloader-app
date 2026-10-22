@@ -51,6 +51,18 @@ during publication. Typed `engine:health` reports storage failures; the schedule
 retries and reconciles stranded rows once storage works. Corrupt DBs are preserved.
 Browser preview has separate validated, versioned localStorage and a single tab.
 
+Download locations are optional fields in settings and jobs. The native picker
+checks and canonicalizes an existing writable destination, then saves it through
+the manager. Enqueue records the current preference under the same manager lock.
+Changing the preference affects new jobs; older queued/active/retried work and
+completed outputs retain their own root. Missing fields use the original default
+root so old SQLite payloads continue to work. Engine file operations, including
+Open/reveal and receipt cleanup, resolve the recorded root and keep all existing
+ownership/checksum checks. Selected folders cannot be silently recreated or
+redirected by replacement symlinks. The renderer has only a narrow chooser command
+with a reset flag; normal settings updates cannot replace the chosen path.
+See ADR 0005 for the picker and persistence boundary.
+
 Real transfer progress includes an optional measured `speedBytesPerSecond` from
 yt-dlp's JSON progress template. Percent maps across streams; speed retains its
 actual bytes/second value. The manager validates and persists rates before events,

@@ -9,9 +9,36 @@ import {
   jobSchema,
   publicUrlSchema,
   settingsSchema,
+  commandSchemas,
 } from './index';
 
 describe('wire contracts', () => {
+  it('preserves selected folders without changing older job and settings payloads', () => {
+    expect(jobSchema.parse(fixture).downloadDirectory).toBeUndefined();
+    expect(
+      jobSchema.parse({ ...fixture, downloadDirectory: '/Selected videos' })
+        .downloadDirectory,
+    ).toBe('/Selected videos');
+    expect(
+      settingsSchema.parse({ concurrency: 2, theme: 'dark' }).downloadDirectory,
+    ).toBeUndefined();
+    expect(
+      settingsSchema.parse({
+        concurrency: 2,
+        theme: 'dark',
+        downloadDirectory: '/Selected videos',
+      }).downloadDirectory,
+    ).toBe('/Selected videos');
+    expect(
+      commandSchemas.choose_download_directory.input.safeParse({
+        reset: false,
+        path: '/arbitrary',
+      }).success,
+    ).toBe(false);
+    expect(
+      commandSchemas.choose_download_directory.output.parse(null),
+    ).toBeNull();
+  });
   it('retains a typed local retry pause and still accepts older errors', () => {
     const error = {
       code: 'rate_limited',

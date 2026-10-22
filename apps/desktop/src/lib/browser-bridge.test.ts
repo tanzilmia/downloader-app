@@ -30,6 +30,15 @@ afterEach(() => {
 });
 
 describe('browser preview adapter', () => {
+  it('does not pretend to select a native download folder in browser preview', async () => {
+    const bridge = instance();
+    await expect(
+      bridge.invoke('choose_download_directory', { reset: false }),
+    ).rejects.toThrow('desktop app');
+    expect(
+      (await bridge.invoke('get_snapshot', {})).settings.downloadDirectory,
+    ).toBeUndefined();
+  });
   it('matches the shared native mock metadata', () => {
     expect(mockMedia(fixture.media.url)).toEqual(fixture.media);
   });

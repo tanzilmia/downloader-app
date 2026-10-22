@@ -12,6 +12,7 @@
     "allow-cancel-job",
     "allow-retry-job",
     "allow-update-settings",
-    "allow-open-output"
+    "allow-open-output",
+    "allow-choose-download-directory"
   ]
 }

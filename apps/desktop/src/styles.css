@@ -1383,6 +1383,60 @@ select {
   font-size: 13px;
   font-weight: 650;
 }
+.download-location {
+  min-width: 0;
+}
+.download-location-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.download-location-row > svg {
+  color: var(--muted);
+}
+.download-location-path {
+  flex: 1;
+  min-width: 120px;
+}
+.download-location-path > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.download-location-path > p {
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.download-location-help,
+.download-location-notice {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.8;
+  margin-top: 10px;
+}
+.download-location-notice:empty {
+  display: none;
+}
+.download-location-notice {
+  display: block;
+}
+.download-location-compact {
+  margin: 14px 0;
+}
+.download-location-compact .download-location-row {
+  padding: 11px;
+  background: var(--bg);
+  gap: 8px;
+}
+.download-location-compact .download-location-path {
+  min-width: 100px;
+}
 .settings-intro > p {
   font-size: 10px;
   color: var(--faint);
